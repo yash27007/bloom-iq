@@ -1,19 +1,53 @@
-import { type NextRequest } from 'next/server'
-import { updateSession } from '@/utils/supabase/middleware'
+import { withAuth } from "next-auth/middleware";
+import { NextResponse } from "next/server";
 
-export async function middleware(request: NextRequest) {
-  return await updateSession(request)
-}
+export default withAuth(
+  function middleware(req) {
+    const token = req.nextauth.token;
+    const pathname = req.nextUrl.pathname;
+
+    // Public routes that don't require authentication
+    if (pathname.startsWith("/auth/signin") || pathname === "/") {
+      return NextResponse.next();
+    }
+
+    // Require authentication for all other routes
+    if (!token) {
+      return NextResponse.redirect(new URL("/auth/signin", req.url));
+    }
+
+    // Admin-only routes
+    if (pathname.startsWith("/admin") && token.role !== "ADMIN") {
+      return NextResponse.redirect(new URL("/unauthorized", req.url));
+    }
+
+    // Course coordinator routes
+    if (
+      pathname.startsWith("/course-coordinator") &&
+      !["COURSE_COORDINATOR", "ADMIN"].includes(token.role as string)
+    ) {
+      return NextResponse.redirect(new URL("/unauthorized", req.url));
+    }
+
+    return NextResponse.next();
+  },
+  {
+    callbacks: {
+      authorized: ({ token, req }) => {
+        const pathname = req.nextUrl.pathname;
+
+        // Allow access to public routes
+        if (pathname.startsWith("/auth/signin") || pathname === "/") {
+          return true;
+        }
+
+        // Require token for all other routes
+        return !!token;
+      },
+    },
+  }
+);
 
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * Feel free to modify this pattern to include more paths.
-     */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
-  ],
-}
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|public).*)"],
+};

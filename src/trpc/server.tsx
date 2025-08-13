@@ -1,14 +1,26 @@
-import 'server-only'; // <-- ensure this file cannot be imported from the client
-import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query';
+import 'server-only';
+import { createCallerFactory } from './init';
 import { cache } from 'react';
-import { createTRPCContext } from './init';
-import { makeQueryClient } from './query-client';
+import { createTRPCContext } from './context';
 import { appRouter } from './routers/_app';
-// IMPORTANT: Create a stable getter for the query client that
-//            will return the same client during the same request.
-export const getQueryClient = cache(makeQueryClient);
-export const trpc = createTRPCOptionsProxy({
-  ctx: createTRPCContext,
-  router: appRouter,
-  queryClient: getQueryClient,
+
+const createCaller = createCallerFactory(appRouter);
+
+// Create a server-side tRPC caller
+export const trpc = cache(async () => {
+  const context = await createTRPCContext({
+    req: new Request('http://localhost:3000'),
+    resHeaders: new Headers(),
+    info: {
+      isBatchCall: false,
+      calls: [],
+      accept: 'application/jsonl',
+      type: 'query',
+      connectionParams: {},
+      signal: new AbortController().signal,
+      url: new URL('http://localhost:3000'),
+    },
+  });
+
+  return createCaller(context);
 });

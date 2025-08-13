@@ -1,0 +1,36 @@
+# Bun configuration for BloomIQ
+[install]
+# Optimize package installation
+cache = true
+optional = true
+dev = true
+peer = true
+production = false
+
+# Registry configuration
+registry = "https://registry.npmjs.org/"
+
+# Lockfile configuration
+lockfile = true
+
+[install.scopes]
+# Add any scoped package configurations here if needed
+
+[run]
+# Optimize runtime performance
+bun = true
+
+# Environment configurations
+[env]
+# Development optimizations
+NODE_ENV = "development"
+
+# Build optimizations
+[build]
+# Enable source maps for development
+sourcemap = "external"
+
+# Experimental features
+[experimental]
+# Enable Bun's faster module resolution
+bundler = true

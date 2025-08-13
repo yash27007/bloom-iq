@@ -14,6 +14,9 @@ datasource db {
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
+
+// enums
+
 enum Role {
   COURSE_COORDINATOR
   MODULE_COORDINATOR
@@ -21,21 +24,260 @@ enum Role {
   CONTROLLER_OF_EXAMINATION
   ADMIN
 }
+
+enum BLOOM_LEVEL {
+  REMEMBER
+  UNDERSTAND
+  APPLY
+  ANALYZE
+  EVALUATE
+  CREATE
+}
+
+enum DIFFICULTY_LEVEL {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum STATUS {
+  CREATED_BY_COURSE_COORDINATOR
+  UNDER_REVIEW_FROM_PROGRAM_COORDINATOR
+  UNDER_REVIEW_FROM_MODULE_COORDINATOR
+  ACCEPTED
+  REJECTED
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum QuestionType {
+  STRAIGHTFORWARD // Straightforward questions from content
+  PROBLEM_BASED // Problem-solving questions  
+  SCENARIO_BASED // Scenario-based questions
+}
+
+enum Marks {
+  TWO_MARKS // 2 marks questions
+  EIGHT_MARKS // 8 marks questions  
+  SIXTEEN_MARKS // 16 marks questions
+}
+
+enum QuestionCategory {
+  DIRECT // Direct questions from content
+  SCENARIO // Scenario-based questions
+  PROBLEMATIC // Problem-solving questions
+  MIXED // Combination of types
+}
+
+enum ProcessingStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum MaterialType {
+  SYLLABUS
+  UNIT_MATERIAL
+}
+
+// models
+
 model User {
-  id         String   @id @default(uuid())
-  firstName  String
-  lastName   String
-  password   String
-  email      String   @unique
-  role       Role
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  @@map("users")
+  id        String   @id @default(uuid())
+  firstName String
+  lastName  String
+  email     String   @unique
+  password  String
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  CourseCoordinatorCourses  Course[]   @relation("CourseCoordinator")
+  ModuleCoordinatorCourses  Course[]   @relation("ModuleCoordinator")
+  ProgramCoordinatorCourses Course[]   @relation("ProgramCoordinator")
+  reviewedQuestions         Question[] @relation("Reviewer")
+
+  createdPatterns QuestionPaperPattern[] @relation("PatternCreator")
+  generatedPapers QuestionPaper[]        @relation("PaperGenerator")
+
+  uploadedMaterials CourseMaterial[]
+  questionJobs      QuestionGenerationJob[]
+
   @@index([email])
 }
 
 model Course {
-  id         String   @id @default(uuid())
-  courseCode String  @unique
+  id         String @id @default(uuid())
+  courseCode String @unique
   courseName String
+
+  courseCoordinatorId  String
+  moduleCoordinatorId  String
+  programCoordinatorId String
+
+  courseCoordinator  User @relation("CourseCoordinator", fields: [courseCoordinatorId], references: [id])
+  moduleCoordinator  User @relation("ModuleCoordinator", fields: [moduleCoordinatorId], references: [id])
+  programCoordinator User @relation("ProgramCoordinator", fields: [programCoordinatorId], references: [id])
+
+  questions       Question[]
+  materials       CourseMaterial[]
+  paperPatterns   QuestionPaperPattern[]
+  generatedPapers QuestionPaper[]
+  questionJobs    QuestionGenerationJob[]
+}
+
+model CourseMaterial {
+  id           String       @id @default(uuid())
+  courseId     String
+  uploadedById String
+  title        String
+  unit         Int? // Null for syllabus
+  filePath     String // Supabase Storage path
+  materialType MaterialType
+  version      Int          @default(1)
+  uploadedAt   DateTime     @default(now())
+
+  course             Course                  @relation(fields: [courseId], references: [id])
+  uploadedBy         User                    @relation(fields: [uploadedById], references: [id])
+  questionJobs       QuestionGenerationJob[]
+  chunks             DocumentChunk[]
+  generatedQuestions Question[]              @relation("SourceMaterial")
+}
+
+model DocumentChunk {
+  id         String                       @id @default(uuid())
+  materialId String
+  content    String // The actual text content of the chunk
+  chunkIndex Int // Order of this chunk in the document
+  embedding  Unsupported("vector(1536)")? // Vector embedding for semantic search
+  metadata   Json? // Additional metadata (page number, section, etc.)
+  createdAt  DateTime                     @default(now())
+
+  material CourseMaterial @relation(fields: [materialId], references: [id])
+
+  @@index([materialId])
+  @@map("document_chunks")
+}
+
+model Question {
+  id              String           @id @default(uuid())
+  question        String // Main question text (matches output format)
+  answer          String? // Primary answer field (matches output format)
+  questionType    QuestionType
+  unit            Int // Course unit number (Unit 1 = CO1)
+  bloomLevel      BLOOM_LEVEL
+  difficultyLevel DIFFICULTY_LEVEL
+  marks           Marks // Marks weightage (TWO_MARKS, EIGHT_MARKS, SIXTEEN_MARKS)
+  category        QuestionCategory @default(DIRECT) // Question category
+  status          STATUS           @default(CREATED_BY_COURSE_COORDINATOR)
+  topic           String? // Topic from course material
+
+  // MCQ specific fields (now unused but kept for compatibility)
+  optionA       String?
+  optionB       String?
+  optionC       String?
+  optionD       String?
+  correctAnswer String? // For MCQ and TRUE_FALSE
+
+  // Additional fields for review and explanation
+  explanation String? // Additional explanation if needed
+
+  // Review fields
+  reviewedById String?
+  reviewedBy   User?     @relation("Reviewer", fields: [reviewedById], references: [id])
+  reviewReason String?
+  reviewedAt   DateTime?
+
+  // Material tracking
+  sourceMaterialId String?
+  sourceMaterial   CourseMaterial? @relation("SourceMaterial", fields: [sourceMaterialId], references: [id])
+
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  QuestionPaperQuestion QuestionPaperQuestion[]
+}
+
+model QuestionPaperPattern {
+  id          String   @id @default(uuid())
+  courseId    String
+  title       String
+  createdById String
+  createdAt   DateTime @default(now())
+
+  course          Course                @relation(fields: [courseId], references: [id])
+  createdBy       User                  @relation("PatternCreator", fields: [createdById], references: [id])
+  questionSlots   QuestionPatternSlot[]
+  generatedPapers QuestionPaper[]       @relation("PatternToPaper")
+}
+
+model QuestionPatternSlot {
+  id               String      @id @default(uuid())
+  patternId        String
+  questionNo       String // e.g. Q1, Q2, Q11A
+  part             String // A, B, etc.
+  marks            Int
+  bloomLevel       BLOOM_LEVEL
+  unit             Int // Unit number (CO mapping)
+  allowsOrQuestion Boolean     @default(false)
+
+  pattern QuestionPaperPattern @relation(fields: [patternId], references: [id])
+}
+
+model QuestionPaper {
+  id            String   @id @default(uuid())
+  courseId      String
+  patternId     String
+  generatedById String
+  generatedAt   DateTime @default(now())
+
+  course      Course               @relation(fields: [courseId], references: [id])
+  pattern     QuestionPaperPattern @relation("PatternToPaper", fields: [patternId], references: [id])
+  generatedBy User                 @relation("PaperGenerator", fields: [generatedById], references: [id])
+
+  questions QuestionPaperQuestion[]
+}
+
+model QuestionPaperQuestion {
+  id              String @id @default(uuid())
+  questionPaperId String
+  questionId      String
+
+  questionPaper QuestionPaper @relation(fields: [questionPaperId], references: [id])
+  question      Question      @relation(fields: [questionId], references: [id])
+}
+
+model QuestionGenerationJob {
+  id             String    @id @default(uuid())
+  courseId       String
+  materialId     String?
+  initiatedById  String
+  status         JobStatus @default(PENDING)
+  progress       Int       @default(0) // 0-100
+  totalQuestions Int       @default(0)
+  generatedCount Int       @default(0)
+  errorMessage   String?
+
+  // Configuration
+  bloomLevels      String // JSON array of bloom levels
+  questionTypes    String // JSON array of question types
+  difficultyLevels String // JSON array of difficulty levels
+  unit             Int?
+  questionsPerType String? // JSON object of counts per type
+
+  course      Course          @relation(fields: [courseId], references: [id])
+  material    CourseMaterial? @relation(fields: [materialId], references: [id])
+  initiatedBy User            @relation(fields: [initiatedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
