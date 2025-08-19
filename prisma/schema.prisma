@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/prisma"
@@ -14,6 +8,7 @@ datasource db {
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
+
 enum Role {
   COURSE_COORDINATOR
   MODULE_COORDINATOR
@@ -21,21 +16,191 @@ enum Role {
   CONTROLLER_OF_EXAMINATION
   ADMIN
 }
+
+enum Designation {
+  ASSISTANT_PROFESSOR
+  ASSOCIATE_PROFESSOR
+  PROFESSOR
+}
+
+enum Material_Type {
+  SYLLABUS
+  UNIT_PDF
+}
+
+
+enum Question_Type {
+  REMEMBER
+  ANALYZE
+  UNDERSTAND
+  APPLY
+  EVALUATE
+  CREATE
+}
+
+/**
+ * Job status for background generation tracking
+ */
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+/**
+ * Marks buckets for university paper pattern
+ */
+enum Marks {
+  TWO
+  EIGHT
+  SIXTEEN
+}
+
+/**
+ * Question review / lifecycle states
+ */
+enum QuestionStatus {
+  DRAFT
+  CREATED_BY_COURSE_COORDINATOR
+  UNDER_REVIEW_FROM_PROGRAM_COORDINATOR
+  UNDER_REVIEW_FROM_MODULE_COORDINATOR
+  ACCEPTED
+  REJECTED
+}
+
+/**
+ * ---------- Models ----------
+ */
+
 model User {
-  id         String   @id @default(uuid())
-  firstName  String
-  lastName   String
-  password   String
-  email      String   @unique
-  role       Role
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id                        String                    @id @default(uuid())
+  firstName                 String
+  lastName                  String
+  facultyId                 String                    @unique
+  password                  String
+  email                     String                    @unique
+  designation               Designation
+  role                      Role
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  courseCoordinatorCourses  Course[]                  @relation("CourseCoordinator")
+  moduleCoordinatorCourses  Course[]                  @relation("ModuleCoordinator")
+  programCoordinatorCourses Course[]                  @relation("ProgramCoordinator")
+  initiatedJobs             Question_Generation_Job[] @relation("InitiatedBy")
+  Course_Material           Course_Material[]
+
+  @@index([email, facultyId])
   @@map("users")
-  @@index([email])
 }
 
 model Course {
+  id                   String @id @default(uuid())
+  course_code          String @unique
+  name                 String
+  description          String
+  courseCoordinatorId  String
+  moduleCoordinatorId  String
+  programCoordinatorId String
+
+  material               Course_Material[]
+  questions              Question[]
+  questionGenerationJobs Question_Generation_Job[] @relation("CourseOnQuestionGenerationJob")
+
+  courseCoordinator  User @relation("CourseCoordinator", fields: [courseCoordinatorId], references: [id], onDelete: Cascade)
+  moduleCoordinator  User @relation("ModuleCoordinator", fields: [moduleCoordinatorId], references: [id], onDelete: Cascade)
+  programCoordinator User @relation("ProgramCoordinator", fields: [programCoordinatorId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([course_code, id])
+  @@map("courses")
+}
+
+model Course_Material {
+  id           String        @id @default(uuid())
+  courseId     String
+  title        String
+  filePath     String
+  materialType Material_Type
+  unit         Int           @default(0)
+  version      Int           @default(1)
+  uploadedById String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  course                  Course                    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  uploadedBy              User                      @relation(fields: [uploadedById], references: [id])
+  Document_Chunk          Document_Chunk[]
+  Question_Generation_Job Question_Generation_Job[]
+
+  @@index([id, courseId])
+  @@map("course_material")
+}
+
+model Question {
+  id           String         @id @default(uuid())
+  courseId     String
+  unit         Int            @default(0) // unit / CO mapping
+  question     String
+  answer       String
+  questionType Question_Type
+  marks        Marks
+  status       QuestionStatus @default(CREATED_BY_COURSE_COORDINATOR)
+
+  course    Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  feedback  Question_Feedback[] @relation("QuestionOnFeedback")
+
+  @@index([courseId, id])
+  @@map("questions")
+}
+
+model Question_Feedback {
   id         String   @id @default(uuid())
-  courseCode String  @unique
-  courseName String
+  questionId String
+  remarks    String
+  question   Question @relation("QuestionOnFeedback", fields: [questionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([questionId, id])
+  @@map("question_feedback")
+}
+
+model Question_Generation_Job {
+  id             String    @id @default(uuid())
+  courseId       String
+  status         JobStatus @default(PENDING)
+  materialId     String
+  unit           Int
+  totalQuestions Int       @default(0)
+  errorMessage   String?
+  initiatedById  String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  courseMaterial Course_Material? @relation(fields: [materialId], references: [id])
+  course         Course           @relation("CourseOnQuestionGenerationJob", fields: [courseId], references: [id])
+  initiatedBy    User?            @relation("InitiatedBy", fields: [initiatedById], references: [id])
+
+  @@index([courseId, materialId])
+  @@map("question_generation_job")
+}
+
+model Document_Chunk {
+  id         String                      @id @default(uuid())
+  materialId String
+  chunkIndex Int
+  content    String
+  embedding  Unsupported("vector(3072)")
+  metadata   Json?
+  createdAt  DateTime                    @default(now())
+  material   Course_Material             @relation(fields: [materialId], references: [id])
+
+  @@index([materialId, chunkIndex])
+  @@map("document_chunks")
 }
