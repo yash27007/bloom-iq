@@ -12,6 +12,12 @@ export const appRouter = createTRPCRouter({
         greeting: `hello ${opts.input.text}`,
       };
     }),
+
+    log: baseProcedure
+      .input(z.object({ message: z.string() }))
+      .mutation((ops) => {
+        console.log(ops.input);
+      })
 });
 // export type definition of API
 export type AppRouter = typeof appRouter;
