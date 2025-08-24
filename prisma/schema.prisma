@@ -1,3 +1,9 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/prisma"
@@ -9,6 +15,8 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// enums
+
 enum Role {
   COURSE_COORDINATOR
   MODULE_COORDINATOR
@@ -17,51 +25,22 @@ enum Role {
   ADMIN
 }
 
-enum Designation {
-  ASSISTANT_PROFESSOR
-  ASSOCIATE_PROFESSOR
-  PROFESSOR
-}
-
-enum Material_Type {
-  SYLLABUS
-  UNIT_PDF
-}
-
-
-enum Question_Type {
+enum BLOOM_LEVEL {
   REMEMBER
-  ANALYZE
   UNDERSTAND
   APPLY
+  ANALYZE
   EVALUATE
   CREATE
 }
 
-/**
- * Job status for background generation tracking
- */
-enum JobStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  FAILED
+enum DIFFICULTY_LEVEL {
+  EASY
+  MEDIUM
+  HARD
 }
 
-/**
- * Marks buckets for university paper pattern
- */
-enum Marks {
-  TWO
-  EIGHT
-  SIXTEEN
-}
-
-/**
- * Question review / lifecycle states
- */
-enum QuestionStatus {
-  DRAFT
+enum STATUS {
   CREATED_BY_COURSE_COORDINATOR
   UNDER_REVIEW_FROM_PROGRAM_COORDINATOR
   UNDER_REVIEW_FROM_MODULE_COORDINATOR
@@ -69,138 +48,137 @@ enum QuestionStatus {
   REJECTED
 }
 
-/**
- * ---------- Models ----------
- */
+enum MaterialType {
+  SYLLABUS
+  UNIT_MATERIAL
+}
+
+// models
 
 model User {
-  id                        String                    @id @default(uuid())
-  firstName                 String
-  lastName                  String
-  facultyId                 String                    @unique
-  password                  String
-  email                     String                    @unique
-  designation               Designation
-  role                      Role
-  createdAt                 DateTime                  @default(now())
-  updatedAt                 DateTime                  @updatedAt
-  courseCoordinatorCourses  Course[]                  @relation("CourseCoordinator")
-  moduleCoordinatorCourses  Course[]                  @relation("ModuleCoordinator")
-  programCoordinatorCourses Course[]                  @relation("ProgramCoordinator")
-  initiatedJobs             Question_Generation_Job[] @relation("InitiatedBy")
-  Course_Material           Course_Material[]
+  id        String   @id @default(uuid())
+  firstName String
+  lastName  String
+  facultyId String   @unique
+  email     String   @unique
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  password  String
+  CourseCoordinatorCourses  Course[]   @relation("CourseCoordinator")
+  ModuleCoordinatorCourses  Course[]   @relation("ModuleCoordinator")
+  ProgramCoordinatorCourses Course[]   @relation("ProgramCoordinator")
+  reviewedQuestions         Question[] @relation("Reviewer")
 
-  @@index([email, facultyId])
-  @@map("users")
+  createdPatterns QuestionPaperPattern[] @relation("PatternCreator")
+  generatedPapers QuestionPaper[]        @relation("PaperGenerator")
+
+  uploadedMaterials CourseMaterial[]
+
+  @@index([email])
 }
 
 model Course {
-  id                   String @id @default(uuid())
-  course_code          String @unique
-  name                 String
-  description          String
+  id         String @id @default(uuid())
+  courseCode String @unique
+  courseName String
+
   courseCoordinatorId  String
   moduleCoordinatorId  String
   programCoordinatorId String
 
-  material               Course_Material[]
-  questions              Question[]
-  questionGenerationJobs Question_Generation_Job[] @relation("CourseOnQuestionGenerationJob")
+  courseCoordinator  User @relation("CourseCoordinator", fields: [courseCoordinatorId], references: [id])
+  moduleCoordinator  User @relation("ModuleCoordinator", fields: [moduleCoordinatorId], references: [id])
+  programCoordinator User @relation("ProgramCoordinator", fields: [programCoordinatorId], references: [id])
 
-  courseCoordinator  User @relation("CourseCoordinator", fields: [courseCoordinatorId], references: [id], onDelete: Cascade)
-  moduleCoordinator  User @relation("ModuleCoordinator", fields: [moduleCoordinatorId], references: [id], onDelete: Cascade)
-  programCoordinator User @relation("ProgramCoordinator", fields: [programCoordinatorId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([course_code, id])
-  @@map("courses")
+  questions       Question[]
+  materials       CourseMaterial[]
+  paperPatterns   QuestionPaperPattern[]
+  generatedPapers QuestionPaper[]
 }
 
-model Course_Material {
-  id           String        @id @default(uuid())
+model CourseMaterial {
+  id           String       @id @default(uuid())
   courseId     String
-  title        String
-  filePath     String
-  materialType Material_Type
-  unit         Int           @default(0)
-  version      Int           @default(1)
   uploadedById String
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  title        String
+  unit         Int? // Null for syllabus
+  filePath     String // Supabase Storage path
+  materialType MaterialType
+  version      Int          @default(1)
+  uploadedAt   DateTime     @default(now())
 
-  course                  Course                    @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  uploadedBy              User                      @relation(fields: [uploadedById], references: [id])
-  Document_Chunk          Document_Chunk[]
-  Question_Generation_Job Question_Generation_Job[]
-
-  @@index([id, courseId])
-  @@map("course_material")
+  course     Course @relation(fields: [courseId], references: [id])
+  uploadedBy User   @relation(fields: [uploadedById], references: [id])
 }
 
 model Question {
-  id           String         @id @default(uuid())
-  courseId     String
-  unit         Int            @default(0) // unit / CO mapping
-  question     String
-  answer       String
-  questionType Question_Type
-  marks        Marks
-  status       QuestionStatus @default(CREATED_BY_COURSE_COORDINATOR)
+  id              String           @id @default(uuid())
+  question        String
+  answer          String
+  unit            Int // Also treated as CO mapping
+  bloomLevel      BLOOM_LEVEL
+  difficultyLevel DIFFICULTY_LEVEL
+  status          STATUS
 
-  course    Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
-  feedback  Question_Feedback[] @relation("QuestionOnFeedback")
+  reviewedById String?
+  reviewedBy   User?   @relation("Reviewer", fields: [reviewedById], references: [id])
+  reviewReason String?
 
-  @@index([courseId, id])
-  @@map("questions")
-}
-
-model Question_Feedback {
-  id         String   @id @default(uuid())
-  questionId String
-  remarks    String
-  question   Question @relation("QuestionOnFeedback", fields: [questionId], references: [id], onDelete: Cascade)
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([questionId, id])
-  @@map("question_feedback")
+  QuestionPaperQuestion QuestionPaperQuestion[]
 }
 
-model Question_Generation_Job {
-  id             String    @id @default(uuid())
-  courseId       String
-  status         JobStatus @default(PENDING)
-  materialId     String
-  unit           Int
-  totalQuestions Int       @default(0)
-  errorMessage   String?
-  initiatedById  String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+model QuestionPaperPattern {
+  id          String   @id @default(uuid())
+  courseId    String
+  title       String
+  createdById String
+  createdAt   DateTime @default(now())
 
-  courseMaterial Course_Material? @relation(fields: [materialId], references: [id])
-  course         Course           @relation("CourseOnQuestionGenerationJob", fields: [courseId], references: [id])
-  initiatedBy    User?            @relation("InitiatedBy", fields: [initiatedById], references: [id])
-
-  @@index([courseId, materialId])
-  @@map("question_generation_job")
+  course          Course                @relation(fields: [courseId], references: [id])
+  createdBy       User                  @relation("PatternCreator", fields: [createdById], references: [id])
+  questionSlots   QuestionPatternSlot[]
+  generatedPapers QuestionPaper[]       @relation("PatternToPaper")
 }
 
-model Document_Chunk {
-  id         String                      @id @default(uuid())
-  materialId String
-  chunkIndex Int
-  content    String
-  embedding  Unsupported("vector(3072)")
-  metadata   Json?
-  createdAt  DateTime                    @default(now())
-  material   Course_Material             @relation(fields: [materialId], references: [id])
+model QuestionPatternSlot {
+  id               String      @id @default(uuid())
+  patternId        String
+  questionNo       String // e.g. Q1, Q2, Q11A
+  part             String // A, B, etc.
+  marks            Int
+  bloomLevel       BLOOM_LEVEL
+  unit             Int // Unit number (CO mapping)
+  allowsOrQuestion Boolean     @default(false)
 
-  @@index([materialId, chunkIndex])
-  @@map("document_chunks")
+  pattern QuestionPaperPattern @relation(fields: [patternId], references: [id])
+}
+
+model QuestionPaper {
+  id            String   @id @default(uuid())
+  courseId      String
+  patternId     String
+  generatedById String
+  generatedAt   DateTime @default(now())
+
+  course      Course               @relation(fields: [courseId], references: [id])
+  pattern     QuestionPaperPattern @relation("PatternToPaper", fields: [patternId], references: [id])
+  generatedBy User                 @relation("PaperGenerator", fields: [generatedById], references: [id])
+
+  questions QuestionPaperQuestion[]
+}
+
+model QuestionPaperQuestion {
+  id              String @id @default(uuid())
+  questionPaperId String
+  questionId      String
+
+  questionPaper QuestionPaper @relation(fields: [questionPaperId], references: [id])
+  question      Question      @relation(fields: [questionId], references: [id])
 }

@@ -55,6 +55,6 @@ export function TRPCReactProvider(
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
         {props.children}
       </TRPCProvider>
-    </QueryClientProvider>            
+    </QueryClientProvider>
   );
 }
