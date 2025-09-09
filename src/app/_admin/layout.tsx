@@ -31,7 +31,7 @@ export default async function AdminLayout({
                         </div>
                         <div className="flex items-center space-x-4">
                             <span className="text-sm text-gray-700">
-                                Welcome, {session.user.email}
+                                Welcome, {session.user.firstName}
                             </span>
                             <span className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded-full">
                                 {session.user.role}

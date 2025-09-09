@@ -19,7 +19,7 @@ export default function LandingPage() {
   const teamMembers = [
     {
       name: "Yashwanth Aravind",
-      linkedin: "https://linkedin.com/in/yashwanth-aravind"
+      linkedin: "https://linkedin.com/in/yashwantharavind"
     },
     {
       name: "Aakash U",

@@ -1,7 +1,6 @@
 "use server";
-import { signIn, signOut } from "@/lib/auth";
+import { signIn, signOut, auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
 
 export async function credentialsLogin(FormData: {
   email: string;
@@ -15,24 +14,31 @@ export async function credentialsLogin(FormData: {
       redirect: false,
     });
 
+    console.log("SignIn result:", result);
+
     if (result?.error) {
+      console.log("SignIn error:", result.error);
       return { error: "Invalid credentials" };
     }
 
     // Get the session to check user role and redirect accordingly
     const session = await auth();
+    console.log("Session after signin:", session);
 
     if (session?.user?.role) {
       if (session.user.role === "ADMIN") {
         redirect("/admin/dashboard");
-      } else {
+  
+      } else if (session.user.role === "COURSE_COORDINATOR" || session.user.role ==="MODULE_COORDINATOR" || session.user.role === "PROGRAM_COORDINATOR") {
         redirect("/coordinator/dashboard");
+      } else {
+        redirect("/");
       }
+    } else {
+      console.log("No session or role found");
+      return { error: "Authentication failed - no session" };
     }
-
-    return { error: "Authentication failed" };
   } catch (error: unknown) {
-    // Handle NextAuth redirect errors
     if (
       error &&
       typeof error === "object" &&
@@ -40,7 +46,7 @@ export async function credentialsLogin(FormData: {
       typeof error.digest === "string" &&
       error.digest.includes("NEXT_REDIRECT")
     ) {
-      throw error; // Re-throw to allow the redirect to happen
+      throw error;
     }
 
     console.error("Login error:", error);
@@ -50,5 +56,5 @@ export async function credentialsLogin(FormData: {
 
 export async function handleSignOut() {
   await signOut();
-  redirect("/sign-in");
+  redirect("/");
 }

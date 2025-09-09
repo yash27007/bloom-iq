@@ -56,16 +56,16 @@ enum MaterialType {
 // models
 
 model User {
-  id        String   @id @default(uuid())
-  firstName String
-  lastName  String
-  facultyId String   @unique
-  email     String   @unique
-  role      Role
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  password  String
-  CourseCoordinatorCourses  Course[]   @relation("CourseCoordinator")
+  id                        String     @id @default(uuid())
+  firstName                 String
+  lastName                  String
+  facultyId                 String     @unique
+  email                     String     @unique
+  role                      Role
+  createdAt                 DateTime   @default(now())
+  updatedAt                 DateTime   @updatedAt
+  password                  String
+  CourseCoordinatorCourse   Course?    @relation("CourseCoordinator")
   ModuleCoordinatorCourses  Course[]   @relation("ModuleCoordinator")
   ProgramCoordinatorCourses Course[]   @relation("ProgramCoordinator")
   reviewedQuestions         Question[] @relation("Reviewer")
@@ -75,7 +75,7 @@ model User {
 
   uploadedMaterials CourseMaterial[]
 
-  @@index([email])
+  @@index([email, facultyId])
 }
 
 model Course {
@@ -83,7 +83,7 @@ model Course {
   courseCode String @unique
   courseName String
 
-  courseCoordinatorId  String
+  courseCoordinatorId  String @unique
   moduleCoordinatorId  String
   programCoordinatorId String
 

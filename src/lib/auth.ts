@@ -13,22 +13,47 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Password", type: "password" },
       },
       authorize: async (credentials) => {
-        const parsed = loginSchema.safeParse(credentials);
-        if (!parsed.success) return null;
+        try {
+          console.log("Authorize called with:", credentials);
 
-        const { email, password } = parsed.data;
+          const parsed = loginSchema.safeParse(credentials);
+          if (!parsed.success) {
+            console.log("Schema validation failed:", parsed.error);
+            return null;
+          }
 
-        const user = await prisma.user.findUnique({ where: { email } });
-        if (!user) return null;
+          const { email, password } = parsed.data;
+          console.log("Looking for user with email:", email);
 
-        const isValid = await bcrypt.compare(password, user.password);
-        if (!isValid) return null;
+          const user = await prisma.user.findUnique({ where: { email } });
+          if (!user) {
+            console.log("User not found");
+            return null;
+          }
 
-        return {
-          id: user.id,
-          email: user.email,
-          role: user.role,
-        };
+          console.log("User found, checking password");
+          const isValid = await bcrypt.compare(password, user.password);
+          if (!isValid) {
+            console.log("Password invalid");
+            return null;
+          }
+
+          console.log("User authenticated successfully:", {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+          });
+          return {
+            id: user.id,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            role: user.role,
+          };
+        } catch (error) {
+          console.error("Error in authorize function:", error);
+          return null;
+        }
       },
     }),
   ],
@@ -43,6 +68,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user) {
         token.id = user.id;
         token.email = user.email;
+        token.firstName = user.firstName;
+        token.lastName = user.lastName;
         token.role = user.role;
       }
       return token;
@@ -51,15 +78,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session.user) {
         session.user.id = token.id as string;
         session.user.email = token.email as string;
+        session.user.firstName = token.firstName as string;
+        session.user.lastName = token.lastName as string;
         session.user.role = token.role as string;
       }
       return session;
     },
     async redirect({ url, baseUrl }) {
-      // For sign-in, we'll handle redirection in the authorize callback
-      // Allows relative callback URLs
+      // Default redirections
       if (url.startsWith("/")) return `${baseUrl}${url}`;
-      // Allows callback URLs on the same origin
       else if (new URL(url).origin === baseUrl) return url;
       return baseUrl;
     },
