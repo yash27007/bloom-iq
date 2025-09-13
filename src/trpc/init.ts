@@ -45,7 +45,7 @@ export const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 
 // Course Coordinator procedure
 export const coordinatorProcedure = protectedProcedure.use(({ ctx, next }) => {
-  if (!["ADMIN", "COURSE_COORDINATOR"].includes(ctx.session.user.role)) {
+  if (!["ADMIN", "COURSE_COORDINATOR", "MODULE_COORDINATOR", "PROGRAM_COORDINATOR", "CONTROLLER_OF_EXAMINATION"].includes(ctx.session.user.role)) {
     throw new TRPCError({ code: "FORBIDDEN" });
   }
   return next({

@@ -21,10 +21,10 @@ export default withAuth(
       return NextResponse.redirect(new URL("/unauthorized", req.url));
     }
 
-    // Course coordinator routes
+    // Course coordinator routes - allow all coordinator roles
     if (
       pathname.startsWith("/course-coordinator") &&
-      !["COURSE_COORDINATOR", "ADMIN"].includes(token.role as string)
+      !["COURSE_COORDINATOR", "MODULE_COORDINATOR", "PROGRAM_COORDINATOR", "CONTROLLER_OF_EXAMINATION", "ADMIN"].includes(token.role as string)
     ) {
       return NextResponse.redirect(new URL("/unauthorized", req.url));
     }

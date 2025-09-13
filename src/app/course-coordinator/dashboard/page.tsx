@@ -16,7 +16,7 @@ import { FileUpload } from '@/components/FileUpload';
 import { JobStatusCard } from '@/components/JobStatusCard';
 import { QuestionPaperGenerator } from '@/components/QuestionPaperGenerator';
 import { QuestionBank } from '@/components/QuestionBank';
-import { Upload, FileText, BookOpen, Users, BarChart3, Brain, Sparkles, CheckCircle, Clock, Loader2, LogOut, Settings } from 'lucide-react';
+import { Upload, FileText, BookOpen, Users, Brain, Sparkles, CheckCircle, Clock, Loader2, LogOut, Settings } from 'lucide-react';
 import { toast } from 'sonner';
 
 type Course = {
@@ -50,26 +50,6 @@ type Course = {
   };
 };
 
-type QuestionPaperConfig = {
-  courseId: string;
-  title: string;
-  duration: number;
-  totalMarks: number;
-  instructions: string[];
-  sections: Array<{
-    id: string;
-    name: string;
-    instructions: string;
-    questions: Array<{
-      bloomLevel: string;
-      difficultyLevel: string;
-      marks: number;
-      count: number;
-      questionType: string;
-    }>;
-  }>;
-};
-
 export default function CourseCoordinatorDashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -97,9 +77,18 @@ export default function CourseCoordinatorDashboard() {
 
   // Question Bank state
   const [selectedQuestionCourse, setSelectedQuestionCourse] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [questionsPerPage] = useState<number>(20);
 
   // tRPC hooks
+  const { data: debugData } = trpc.course.debugSession.useQuery();
   const { data: courses, isLoading: coursesLoading } = trpc.course.getMyCourses.useQuery();
+
+  // Debug logging
+  console.log('Debug data:', debugData);
+  console.log('Courses data:', courses);
+  console.log('Session:', session);
+
   const { data: materials } = trpc.material.getMaterialsByCourse.useQuery(
     { courseId: selectedCourse },
     { enabled: !!selectedCourse }
@@ -113,13 +102,19 @@ export default function CourseCoordinatorDashboard() {
 
   // Question Bank tRPC hooks
   const { data: questionData, isLoading: questionsLoading, refetch: refetchQuestions } = trpc.question.getCourseQuestions.useQuery(
-    { courseId: selectedQuestionCourse },
+    {
+      courseId: selectedQuestionCourse,
+      page: currentPage,
+      limit: questionsPerPage
+    },
     { enabled: !!selectedQuestionCourse }
   );
   const updateQuestionMutation = trpc.question.updateQuestion.useMutation();
   const approveQuestionMutation = trpc.question.approveQuestion.useMutation();
   const rejectQuestionMutation = trpc.question.rejectQuestion.useMutation();
   const submitQuestionsMutation = trpc.question.submitQuestionsForReview.useMutation();
+  const deleteQuestionMutation = trpc.question.deleteQuestion.useMutation();
+  const deleteMultipleQuestionsMutation = trpc.question.deleteMultipleQuestions.useMutation();
 
   // File upload handler
   const handleFileUpload = async (courseId: string, materialType: 'SYLLABUS' | 'UNIT_MATERIAL', unit?: number) => {
@@ -271,28 +266,34 @@ export default function CourseCoordinatorDashboard() {
     }
   };
 
-  const handleRefreshQuestions = () => {
-    refetchQuestions();
+  const handleDeleteQuestion = async (questionId: string) => {
+    try {
+      await deleteQuestionMutation.mutateAsync({ questionId });
+      refetchQuestions();
+      toast.success('Question deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting question:', error);
+      throw error;
+    }
   };
 
-  const generatePaperContent = (config: QuestionPaperConfig) => {
-    return `
-      ${config.title}
-      Duration: ${config.duration} minutes
-      Total Marks: ${config.totalMarks}
-      
-      Instructions:
-      ${config.instructions.map((inst: string, i: number) => `${i + 1}. ${inst}`).join('\n')}
-      
-      ${config.sections.map((section) => `
-        ${section.name}
-        ${section.instructions}
-        
-        ${section.questions.map((q, i: number) =>
-      `Q${i + 1}. [Sample ${q.questionType} question - ${q.marks} marks]`
-    ).join('\n')}
-      `).join('\n')}
-    `;
+  const handleDeleteMultipleQuestions = async (questionIds: string[]) => {
+    try {
+      await deleteMultipleQuestionsMutation.mutateAsync({ questionIds });
+      refetchQuestions();
+      toast.success('Questions deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting questions:', error);
+      throw error;
+    }
+  };
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  const handleRefreshQuestions = () => {
+    refetchQuestions();
   };
 
   const downloadPDF = (content: string, filename: string) => {
@@ -532,10 +533,10 @@ export default function CourseCoordinatorDashboard() {
                     <Badge
                       variant="outline"
                       className={`text-xs font-medium ${course.courseCoordinatorId === session.user.id
-                          ? 'bg-blue-100 text-blue-800 border-blue-300' :
-                          course.moduleCoordinatorId === session.user.id
-                            ? 'bg-green-100 text-green-800 border-green-300' :
-                            'bg-purple-100 text-purple-800 border-purple-300'
+                        ? 'bg-blue-100 text-blue-800 border-blue-300' :
+                        course.moduleCoordinatorId === session.user.id
+                          ? 'bg-green-100 text-green-800 border-green-300' :
+                          'bg-purple-100 text-purple-800 border-purple-300'
                         }`}
                     >
                       {course.courseCoordinatorId === session.user.id ? 'Course Coordinator' :
@@ -962,7 +963,10 @@ export default function CourseCoordinatorDashboard() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="question-course-select">Course</Label>
-                  <Select value={selectedQuestionCourse} onValueChange={setSelectedQuestionCourse}>
+                  <Select value={selectedQuestionCourse} onValueChange={(value) => {
+                    setSelectedQuestionCourse(value);
+                    setCurrentPage(1); // Reset to first page when changing course
+                  }}>
                     <SelectTrigger id="question-course-select">
                       <SelectValue placeholder="Select a course" />
                     </SelectTrigger>
@@ -991,13 +995,22 @@ export default function CourseCoordinatorDashboard() {
           {/* Question Bank */}
           {selectedQuestionCourse ? (
             <QuestionBank
-              questions={questionData?.questions || []}
+              questions={questionData?.questions.map(q => ({
+                ...q,
+                correctAnswer: q.correctAnswer || undefined
+              })) || []}
               isLoading={questionsLoading}
               onRefresh={handleRefreshQuestions}
               onApproveQuestion={handleApproveQuestion}
               onRejectQuestion={handleRejectQuestion}
               onEditQuestion={handleEditQuestion}
               onSubmitQuestions={handleSubmitQuestions}
+              onDeleteQuestion={handleDeleteQuestion}
+              onDeleteMultipleQuestions={handleDeleteMultipleQuestions}
+              totalQuestions={questionData?.pagination?.totalCount || 0}
+              currentPage={currentPage}
+              onPageChange={handlePageChange}
+              questionsPerPage={questionsPerPage}
             />
           ) : (
             <Card>

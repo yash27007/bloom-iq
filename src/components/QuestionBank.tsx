@@ -3,15 +3,12 @@
 import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
 import { QuestionReviewCard } from './QuestionReviewCard';
 import {
   Search,
-  Filter,
   CheckCircle,
   XCircle,
   Send,
@@ -19,7 +16,9 @@ import {
   BarChart3,
   RefreshCw,
   Package,
-  AlertCircle
+  AlertCircle,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -52,6 +51,12 @@ interface QuestionBankProps {
   onRejectQuestion: (questionId: string, reason: string) => Promise<void>;
   onEditQuestion: (questionId: string, updates: Partial<Question>) => Promise<void>;
   onSubmitQuestions: (questionIds: string[]) => Promise<void>;
+  onDeleteQuestion?: (questionId: string) => Promise<void>;
+  onDeleteMultipleQuestions?: (questionIds: string[]) => Promise<void>;
+  totalQuestions?: number;
+  currentPage?: number;
+  onPageChange?: (page: number) => void;
+  questionsPerPage?: number;
 }
 
 export function QuestionBank({
@@ -61,7 +66,13 @@ export function QuestionBank({
   onApproveQuestion,
   onRejectQuestion,
   onEditQuestion,
-  onSubmitQuestions
+  onSubmitQuestions,
+  onDeleteQuestion,
+  onDeleteMultipleQuestions,
+  totalQuestions = 0,
+  currentPage = 1,
+  onPageChange,
+  questionsPerPage = 20
 }: QuestionBankProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
@@ -131,6 +142,28 @@ export function QuestionBank({
       toast.error('Failed to submit questions');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedQuestions.size === 0) {
+      toast.error('Please select questions to delete');
+      return;
+    }
+
+    if (!onDeleteMultipleQuestions) return;
+
+    if (window.confirm(`Are you sure you want to delete ${selectedQuestions.size} selected questions? This action cannot be undone.`)) {
+      setIsSubmitting(true);
+      try {
+        await onDeleteMultipleQuestions(Array.from(selectedQuestions));
+        setSelectedQuestions(new Set());
+        toast.success(`${selectedQuestions.size} questions deleted successfully!`);
+      } catch (error) {
+        toast.error('Failed to delete questions');
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -341,14 +374,26 @@ export function QuestionBank({
               </div>
 
               {selectedQuestions.size > 0 && (
-                <Button
-                  onClick={handleSubmitSelected}
-                  disabled={isSubmitting}
-                  className="bg-blue-600 hover:bg-blue-700"
-                >
-                  <Send className="h-4 w-4 mr-2" />
-                  {isSubmitting ? 'Submitting...' : `Submit ${selectedQuestions.size} Questions`}
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleSubmitSelected}
+                    disabled={isSubmitting}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    <Send className="h-4 w-4 mr-2" />
+                    {isSubmitting ? 'Submitting...' : `Submit ${selectedQuestions.size} Questions`}
+                  </Button>
+                  {onDeleteMultipleQuestions && (
+                    <Button
+                      onClick={handleDeleteSelected}
+                      disabled={isSubmitting}
+                      variant="destructive"
+                    >
+                      <XCircle className="h-4 w-4 mr-2" />
+                      Delete Selected
+                    </Button>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -388,6 +433,7 @@ export function QuestionBank({
                   onApprove={onApproveQuestion}
                   onReject={onRejectQuestion}
                   onEdit={onEditQuestion}
+                  onDelete={onDeleteQuestion}
                   isSubmitting={isSubmitting}
                 />
               </div>
@@ -395,6 +441,71 @@ export function QuestionBank({
           ))
         )}
       </div>
+
+      {/* Pagination Controls */}
+      {totalQuestions > questionsPerPage && onPageChange && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-muted-foreground">
+                Showing {((currentPage - 1) * questionsPerPage) + 1} to {Math.min(currentPage * questionsPerPage, totalQuestions)} of {totalQuestions} questions
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onPageChange(currentPage - 1)}
+                  disabled={currentPage <= 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Previous
+                </Button>
+
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.ceil(totalQuestions / questionsPerPage) }, (_, i) => {
+                    const page = i + 1;
+                    const isVisible =
+                      page === 1 ||
+                      page === Math.ceil(totalQuestions / questionsPerPage) ||
+                      (page >= currentPage - 2 && page <= currentPage + 2);
+
+                    if (!isVisible && page === currentPage - 3) {
+                      return <span key={page} className="px-1">...</span>;
+                    }
+                    if (!isVisible && page === currentPage + 3) {
+                      return <span key={page} className="px-1">...</span>;
+                    }
+                    if (!isVisible) return null;
+
+                    return (
+                      <Button
+                        key={page}
+                        variant={page === currentPage ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => onPageChange(page)}
+                        className="w-8 h-8 p-0"
+                      >
+                        {page}
+                      </Button>
+                    );
+                  })}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onPageChange(currentPage + 1)}
+                  disabled={currentPage >= Math.ceil(totalQuestions / questionsPerPage)}
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

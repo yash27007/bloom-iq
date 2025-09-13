@@ -1,7 +1,6 @@
 import { z } from "zod";
 import {
   createTRPCRouter,
-  protectedProcedure,
   coordinatorProcedure,
 } from "../init";
 import { TRPCError } from "@trpc/server";
@@ -54,7 +53,7 @@ export const questionRouter = createTRPCRouter({
       }
 
       // Build where clause
-      const where: any = {
+      const where: Record<string, unknown> = {
         courseId,
       };
 
@@ -465,5 +464,106 @@ export const questionRouter = createTRPCRouter({
         }, {} as Record<string, number>),
         total: await prisma.question.count({ where: { courseId } }),
       };
+    }),
+
+  // Delete a question
+  deleteQuestion: coordinatorProcedure
+    .input(
+      z.object({
+        questionId: z.string(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const { questionId } = input;
+
+      // First, verify the question exists and user has access
+      const question = await prisma.question.findUnique({
+        where: { id: questionId },
+        include: {
+          course: true,
+        },
+      });
+
+      if (!question) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Question not found",
+        });
+      }
+
+      // Verify user has access to this course
+      const hasAccess =
+        question.course.courseCoordinatorId === ctx.session.user.id ||
+        question.course.moduleCoordinatorId === ctx.session.user.id ||
+        question.course.programCoordinatorId === ctx.session.user.id;
+
+      if (!hasAccess) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You don't have access to delete this question",
+        });
+      }
+
+      // Delete the question
+      await prisma.question.delete({
+        where: { id: questionId },
+      });
+
+      return { success: true };
+    }),
+
+  // Delete multiple questions
+  deleteMultipleQuestions: coordinatorProcedure
+    .input(
+      z.object({
+        questionIds: z.array(z.string()),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const { questionIds } = input;
+
+      if (questionIds.length === 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No questions selected for deletion",
+        });
+      }
+
+      // First, verify all questions exist and user has access
+      const questions = await prisma.question.findMany({
+        where: { id: { in: questionIds } },
+        include: {
+          course: true,
+        },
+      });
+
+      if (questions.length !== questionIds.length) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Some questions not found",
+        });
+      }
+
+      // Verify user has access to all courses
+      for (const question of questions) {
+        const hasAccess =
+          question.course.courseCoordinatorId === ctx.session.user.id ||
+          question.course.moduleCoordinatorId === ctx.session.user.id ||
+          question.course.programCoordinatorId === ctx.session.user.id;
+
+        if (!hasAccess) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: `You don't have access to delete question in course ${question.course.courseName}`,
+          });
+        }
+      }
+
+      // Delete all questions
+      const result = await prisma.question.deleteMany({
+        where: { id: { in: questionIds } },
+      });
+
+      return { deletedCount: result.count };
     }),
 });

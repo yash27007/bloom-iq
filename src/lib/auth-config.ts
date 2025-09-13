@@ -57,6 +57,7 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
+        token.id = user.id; // Store our database user ID
         token.role = user.role;
         token.firstName = user.firstName;
         token.lastName = user.lastName;
@@ -65,7 +66,7 @@ export const authOptions: NextAuthOptions = {
     },
     async session({ session, token }) {
       if (token) {
-        session.user.id = token.sub!;
+        session.user.id = token.id as string; // Use our stored user ID
         session.user.role = token.role as Role;
         session.user.firstName = token.firstName as string;
         session.user.lastName = token.lastName as string;

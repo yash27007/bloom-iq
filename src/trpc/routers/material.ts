@@ -6,10 +6,8 @@ import {
 } from "../init";
 import { prisma } from "@/lib/prisma";
 import { MaterialType } from "@/generated/prisma";
-import {
-  uploadFileToSupabase,
-  deleteFileFromSupabase,
-} from "@/lib/supabase-storage";
+import { writeFileSync, mkdirSync, existsSync } from "fs";
+import path from "path";
 
 export const materialRouter = createTRPCRouter({
   // Upload course material
@@ -84,7 +82,7 @@ export const materialRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const { courseId, title, unit, materialType, fileBase64, fileName } =
+      const { courseId, title, unit, materialType, fileName, fileBase64 } =
         input;
       const userId = ctx.session.user.id;
 
@@ -104,25 +102,20 @@ export const materialRouter = createTRPCRouter({
         throw new Error("Course not found or you do not have access to it");
       }
 
-      // Convert base64 to File-like object
-      const buffer = Buffer.from(fileBase64, "base64");
-      const file = new File([buffer], fileName, { type: "application/pdf" });
-
-      // Upload to Supabase
-      const folderPath = `courses/${courseId}/${materialType.toLowerCase()}`;
-      const publicUrl = await uploadFileToSupabase(file, folderPath);
-
-      if (!publicUrl) {
-        throw new Error("Failed to upload file to storage");
+      // Create uploads directory structure if it doesn't exist
+      const uploadsDir = path.join(process.cwd(), 'uploads');
+      const courseDir = path.join(uploadsDir, courseId);
+      if (!existsSync(courseDir)) {
+        mkdirSync(courseDir, { recursive: true });
       }
 
-      // Save material record to database
-      return await prisma.courseMaterial.create({
+      // Create material record first to get the ID
+      const material = await prisma.courseMaterial.create({
         data: {
           courseId,
           title,
           unit,
-          filePath: publicUrl,
+          filePath: '', // Will be updated after file save
           materialType,
           uploadedById: userId,
         },
@@ -142,6 +135,41 @@ export const materialRouter = createTRPCRouter({
           },
         },
       });
+
+      // Save file using material ID as filename
+      const fileExtension = path.extname(fileName);
+      const savedFileName = `${material.id}${fileExtension}`;
+      const savedPath = path.join(courseDir, savedFileName);
+      const filePath = `uploads/${courseId}/${savedFileName}`;
+      
+      // Convert base64 to buffer and save file
+      const fileBuffer = Buffer.from(fileBase64, 'base64');
+      writeFileSync(savedPath, fileBuffer);
+
+      console.log(`✅ Saved file to: ${savedPath}`);
+
+      // Update material record with correct file path
+      const updatedMaterial = await prisma.courseMaterial.update({
+        where: { id: material.id },
+        data: { filePath },
+        include: {
+          course: {
+            select: {
+              courseCode: true,
+              courseName: true,
+            },
+          },
+          uploadedBy: {
+            select: {
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      return updatedMaterial;
     }),
 
   // Get materials for a course

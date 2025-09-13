@@ -16,7 +16,8 @@ import {
   Clock,
   BookOpen,
   Target,
-  AlertCircle
+  AlertCircle,
+  Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -46,6 +47,7 @@ interface QuestionReviewCardProps {
   onApprove: (questionId: string) => Promise<void>;
   onReject: (questionId: string, reason: string) => Promise<void>;
   onEdit: (questionId: string, updates: Partial<Question>) => Promise<void>;
+  onDelete?: (questionId: string) => Promise<void>;
   isSubmitting?: boolean;
 }
 
@@ -54,6 +56,7 @@ export function QuestionReviewCard({
   onApprove,
   onReject,
   onEdit,
+  onDelete,
   isSubmitting = false
 }: QuestionReviewCardProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -88,6 +91,19 @@ export function QuestionReviewCard({
       toast.success('Question rejected');
     } catch (error) {
       toast.error('Failed to reject question');
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!onDelete) return;
+
+    if (window.confirm('Are you sure you want to delete this question? This action cannot be undone.')) {
+      try {
+        await onDelete(question.id);
+        toast.success('Question deleted successfully');
+      } catch (error) {
+        toast.error('Failed to delete question');
+      }
     }
   };
 
@@ -172,11 +188,22 @@ export function QuestionReviewCard({
                     <Edit3 className="h-4 w-4 mr-1" />
                     Edit
                   </Button>
+                  {onDelete && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDelete()}
+                      className="text-red-600 hover:text-red-700"
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Delete
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setShowRejectForm(true)}
-                    className="text-red-600 hover:text-red-700"
+                    className="text-orange-600 hover:text-orange-700"
                   >
                     <XCircle className="h-4 w-4 mr-1" />
                     Reject

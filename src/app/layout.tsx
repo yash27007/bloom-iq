@@ -33,9 +33,6 @@ export const metadata: Metadata = {
     title: "BloomIQ - AI-Powered Question Paper Generator",
     description: "Intelligent question paper generation platform for universities using AI, Bloom's taxonomy, and RAG pipeline for contextual academic content creation.",
   },
-  viewport: "width=device-width, initial-scale=1",
-  themeColor: "#2563eb",
-  manifest: "/manifest.json",
 };
 
 export default function RootLayout({

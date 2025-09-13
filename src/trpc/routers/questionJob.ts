@@ -99,42 +99,66 @@ export const questionJobRouter = createTRPCRouter({
         },
       });
 
-      // Trigger question generation
+      // Always use the new markdown-based Inngest function for all environments
       try {
+        console.log("🚀 Attempting to send Inngest event:", {
+          event: "documents/process-and-generate",
+          jobId: job.id,
+          courseId,
+          materialId,
+          unit
+        });
+        
+        // In development, check if we can use Inngest or need to fallback
         if (process.env.NODE_ENV === "development") {
-          // For development, trigger direct processing
-          setImmediate(async () => {
-            try {
-              // Import and call the processing function directly
-              const { processQuestionGeneration } = await import(
-                "@/app/api/questions/generate/route"
-              );
-              await processQuestionGeneration(job.id, {
+          try {
+            await inngest.send({
+              name: "documents/process-and-generate",
+              data: {
+                jobId: job.id,
                 courseId,
                 materialId,
                 unit,
+                questionsPerBloomLevel,
                 questionTypes,
                 difficultyLevels,
-                questionsPerBloomLevel,
-              });
-            } catch (error) {
-              console.error("Background processing error:", error);
-              await prisma.questionGenerationJob.update({
-                where: { id: job.id },
-                data: {
-                  status: "FAILED",
-                  errorMessage:
-                    error instanceof Error
-                      ? error.message
-                      : "Background processing failed",
-                },
-              });
-            }
-          });
+                marks,
+              },
+            });
+            console.log("✅ Inngest event sent successfully for job:", job.id);
+          } catch (inngestError) {
+            // Suppress unused variable warning - we don't need to use inngestError
+            void inngestError;
+            console.log("⚠️ Inngest not available in development, processing directly...");
+            
+            // Import and run the processing function directly
+            const { processQuestionGenerationDirectly } = await import("@/lib/direct-question-processor");
+            
+            // Run the function directly without Inngest (fire and forget)
+            setImmediate(async () => {
+              try {
+                await processQuestionGenerationDirectly({
+                  jobId: job.id,
+                  courseId,
+                  materialId,
+                  unit,
+                  questionsPerBloomLevel,
+                  questionTypes,
+                  difficultyLevels,
+                  marks,
+                });
+                console.log("✅ Direct processing completed for job:", job.id);
+              } catch (directError) {
+                console.error("❌ Direct processing failed:", directError);
+              }
+            });
+            
+            console.log("✅ Processing started directly (background) for job:", job.id);
+          }
         } else {
-          // For production, use Inngest
+          // Production: Use Inngest normally
           await inngest.send({
-            name: "questions/requested",
+            name: "documents/process-and-generate",
             data: {
               jobId: job.id,
               courseId,
@@ -146,9 +170,18 @@ export const questionJobRouter = createTRPCRouter({
               marks,
             },
           });
+          console.log("✅ Inngest event sent successfully for job:", job.id);
         }
+        
       } catch (error) {
-        console.error("Failed to trigger question generation:", error);
+        console.error("❌ Failed to trigger question generation:", error);
+        console.error("Error details:", {
+          message: error instanceof Error ? error.message : "Unknown error",
+          stack: error instanceof Error ? error.stack : undefined,
+          type: typeof error,
+          error
+        });
+        
         // Update job status to failed
         await prisma.questionGenerationJob.update({
           where: { id: job.id },
@@ -160,9 +193,10 @@ export const questionJobRouter = createTRPCRouter({
                 : "Failed to start processing",
           },
         });
+        
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to start question generation",
+          message: `Failed to start question generation: ${error instanceof Error ? error.message : "Unknown error"}`,
         });
       }
 

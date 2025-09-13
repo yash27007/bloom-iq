@@ -16,7 +16,7 @@ export default function Home() {
       // Redirect based on role if authenticated
       if (session.user.role === "ADMIN") {
         router.push("/admin/dashboard")
-      } else if (session.user.role === "COURSE_COORDINATOR") {
+      } else if (["COURSE_COORDINATOR", "MODULE_COORDINATOR", "PROGRAM_COORDINATOR", "CONTROLLER_OF_EXAMINATION"].includes(session.user.role)) {
         router.push("/course-coordinator/dashboard")
       } else {
         router.push("/dashboard")

@@ -8,6 +8,46 @@ import {
 import { prisma } from "@/lib/prisma";
 
 export const courseRouter = createTRPCRouter({
+  // Debug query to check session data
+  debugSession: protectedProcedure.query(async ({ ctx }) => {
+    const userId = ctx.session.user.id;
+    console.log('Debug session - userId:', userId, 'role:', ctx.session.user.role, 'email:', ctx.session.user.email);
+    
+    // Check if user exists in database
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        role: true,
+      }
+    });
+    
+    console.log('User from database:', user);
+    
+    // Check all courses and their coordinator assignments
+    const allCourses = await prisma.course.findMany({
+      select: {
+        id: true,
+        courseCode: true,
+        courseName: true,
+        courseCoordinatorId: true,
+        moduleCoordinatorId: true,
+        programCoordinatorId: true,
+      }
+    });
+    
+    console.log('All courses:', allCourses);
+    
+    return {
+      sessionUser: ctx.session.user,
+      dbUser: user,
+      allCourses: allCourses,
+    };
+  }),
+
   // Admin only: Get all courses
   getCourses: adminProcedure.query(async () => {
     return await prisma.course.findMany({
@@ -186,13 +226,34 @@ export const courseRouter = createTRPCRouter({
   // Coordinator: Get courses they coordinate
   getMyCourses: coordinatorProcedure.query(async ({ ctx }) => {
     const userId = ctx.session.user.id;
+    const userEmail = ctx.session.user.email;
+    const userRole = ctx.session.user.role;
+    
+    console.log('🔍 getMyCourses DEBUG:');
+    console.log('  - User ID from session:', userId);
+    console.log('  - User email from session:', userEmail);
+    console.log('  - User role from session:', userRole);
 
-    return await prisma.course.findMany({
+    // Get the correct user ID from the database using email
+    const dbUser = await prisma.user.findUnique({
+      where: { email: userEmail },
+      select: { id: true, email: true, role: true }
+    });
+    
+    if (!dbUser) {
+      console.log('❌ User not found in database with email:', userEmail);
+      return [];
+    }
+    
+    console.log('  - User found by email:', dbUser);
+    const correctUserId = dbUser.id;
+
+    const courses = await prisma.course.findMany({
       where: {
         OR: [
-          { courseCoordinatorId: userId },
-          { moduleCoordinatorId: userId },
-          { programCoordinatorId: userId },
+          { courseCoordinatorId: correctUserId },
+          { moduleCoordinatorId: correctUserId },
+          { programCoordinatorId: correctUserId },
         ],
       },
       include: {
@@ -229,6 +290,15 @@ export const courseRouter = createTRPCRouter({
       },
       orderBy: { courseName: "asc" },
     });
+
+    console.log('Found courses:', courses.length, courses.map(c => ({ code: c.courseCode, ccId: c.courseCoordinatorId, mcId: c.moduleCoordinatorId, pcId: c.programCoordinatorId })));
+    console.log('  - Detailed course check for user:', userId);
+    courses.forEach(course => {
+      console.log(`    Course ${course.courseCode}: CC=${course.courseCoordinatorId}, MC=${course.moduleCoordinatorId}, PC=${course.programCoordinatorId}`);
+      console.log(`    Matches: CC=${course.courseCoordinatorId === userId}, MC=${course.moduleCoordinatorId === userId}, PC=${course.programCoordinatorId === userId}`);
+    });
+    
+    return courses;
   }),
 
   // Protected: Get course by ID (for users who have access)

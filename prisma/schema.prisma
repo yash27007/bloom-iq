@@ -138,32 +138,24 @@ model CourseMaterial {
   uploadedById String
   title        String
   unit         Int? // Null for syllabus
-  filePath     String // Supabase Storage path
+  filePath     String // Temporary storage path for PDF
   materialType MaterialType
   version      Int          @default(1)
   uploadedAt   DateTime     @default(now())
+  
+  // New fields for markdown approach
+  markdownContent String? // Processed markdown content from PDF
+  sectionsData    Json?   // JSON array of extracted sections
+  isProcessed     Boolean @default(false) // Whether PDF has been processed to markdown
+  processingError String? // Error message if processing failed
 
   course             Course                  @relation(fields: [courseId], references: [id])
   uploadedBy         User                    @relation(fields: [uploadedById], references: [id])
   questionJobs       QuestionGenerationJob[]
-  chunks             DocumentChunk[]
   generatedQuestions Question[]              @relation("SourceMaterial")
 }
 
-model DocumentChunk {
-  id         String                       @id @default(uuid())
-  materialId String
-  content    String // The actual text content of the chunk
-  chunkIndex Int // Order of this chunk in the document
-  embedding  Unsupported("vector(1536)")? // Vector embedding for semantic search
-  metadata   Json? // Additional metadata (page number, section, etc.)
-  createdAt  DateTime                     @default(now())
-
-  material CourseMaterial @relation(fields: [materialId], references: [id])
-
-  @@index([materialId])
-  @@map("document_chunks")
-}
+// Remove DocumentChunk model as we're not using chunking anymore
 
 model Question {
   id              String           @id @default(uuid())
@@ -273,6 +265,10 @@ model QuestionGenerationJob {
   difficultyLevels String // JSON array of difficulty levels
   unit             Int?
   questionsPerType String? // JSON object of counts per type
+  
+  // New fields for markdown approach
+  sectionsToProcess String? // JSON array of section indices to process
+  processingStage   String  @default("PENDING") // PENDING, MARKDOWN_CONVERSION, SECTION_EXTRACTION, QUESTION_GENERATION, COMPLETED
 
   course      Course          @relation(fields: [courseId], references: [id])
   material    CourseMaterial? @relation(fields: [materialId], references: [id])
