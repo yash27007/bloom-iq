@@ -21,15 +21,21 @@ import * as z from "zod"
 import { Input } from "@/components/ui/input"
 import { Button } from "../ui/button"
 import { useState } from "react"
-import { Eye, EyeOff } from "lucide-react"
+import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { useTRPC } from "@/trpc/client"
 import { useMutation } from "@tanstack/react-query"
+import { FormError } from "@/components/auth/form-error"
+import { FormSuccess } from "@/components/auth/form-success"
+import { useRouter } from "next/navigation"
 
 export const RegisterForm = () => {
     const trpc = useTRPC();
-    const signUpmutation = useMutation(trpc.user.signUp.mutationOptions())
-
-    const [showPassword, setShowPassword] = useState(false)
+    const router = useRouter();
+    const [showPassword, setShowPassword] = useState(false);
+    const [error, setError] = useState<string | undefined>("");
+    const [success, setSuccess] = useState<string | undefined>("");
+    
+    const signUpMutation = useMutation(trpc.user.signUp.mutationOptions());
     const form = useForm<z.infer<typeof signUpSchema>>({
         resolver: zodResolver(signUpSchema),
         defaultValues: {
@@ -44,7 +50,22 @@ export const RegisterForm = () => {
     })
 
     function onSubmit(values: z.infer<typeof signUpSchema>) {
-        signUpmutation.mutate(values)
+        setError("");
+        setSuccess("");
+        
+        signUpMutation.mutate(values, {
+            onSuccess: (data) => {
+                setSuccess(data.message);
+                form.reset();
+                // Redirect to login page after successful signup
+                setTimeout(() => {
+                    router.push("/sign-in");
+                }, 2000);
+            },
+            onError: (error) => {
+                setError(error.message);
+            },
+        });
     }
     return (
         <Form {...form}>
@@ -57,7 +78,13 @@ export const RegisterForm = () => {
                             <FormItem>
                                 <FormLabel>First Name</FormLabel>
                                 <FormControl>
-                                    <Input type="text" placeholder="Bruce" {...field} />
+                                    <Input 
+                                        type="text" 
+                                        placeholder="Enter your first name" 
+                                        className="h-11 px-4 bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+                                        disabled={signUpMutation.isPending}
+                                        {...field} 
+                                    />
                                 </FormControl>
                                 <FormMessage />
                             </FormItem>
@@ -70,7 +97,13 @@ export const RegisterForm = () => {
                             <FormItem>
                                 <FormLabel>Last Name</FormLabel>
                                 <FormControl>
-                                    <Input type="text" placeholder="Wayne" {...field} />
+                                    <Input 
+                                        type="text" 
+                                        placeholder="Enter your last name" 
+                                        className="h-11 px-4 bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+                                        disabled={signUpMutation.isPending}
+                                        {...field} 
+                                    />
                                 </FormControl>
                                 <FormMessage />
                             </FormItem>
@@ -84,7 +117,13 @@ export const RegisterForm = () => {
                         <FormItem>
                             <FormLabel>Email</FormLabel>
                             <FormControl>
-                                <Input type="email" placeholder="brucewayne@batman.com" {...field} />
+                                <Input 
+                                    type="email" 
+                                    placeholder="Enter your email address" 
+                                    className="h-11 px-4 bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+                                    disabled={signUpMutation.isPending}
+                                    {...field} 
+                                />
                             </FormControl>
                             <FormMessage />
                         </FormItem>
@@ -97,7 +136,13 @@ export const RegisterForm = () => {
                         <FormItem>
                             <FormLabel>Faculty Id</FormLabel>
                             <FormControl>
-                                <Input type="text" placeholder="Bruce001" {...field} />
+                                <Input 
+                                    type="text" 
+                                    placeholder="Enter your faculty ID" 
+                                    className="h-11 px-4 bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+                                    disabled={signUpMutation.isPending}
+                                    {...field} 
+                                />
                             </FormControl>
                             <FormMessage />
                         </FormItem>
@@ -114,8 +159,8 @@ export const RegisterForm = () => {
                                     value={field.value}
                                     onValueChange={field.onChange}
                                 >
-                                    <SelectTrigger className="w-full">
-                                        <SelectValue placeholder="Select the designation" />
+                                    <SelectTrigger className="w-full h-11 bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200" disabled={signUpMutation.isPending}>
+                                        <SelectValue placeholder="Select your designation" />
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="ASSISTANT_PROFESSOR">Assistant Professor</SelectItem>
@@ -139,8 +184,8 @@ export const RegisterForm = () => {
                                     value={field.value}
                                     onValueChange={field.onChange}
                                 >
-                                    <SelectTrigger className="w-full">
-                                        <SelectValue placeholder="Select the role" />
+                                    <SelectTrigger className="w-full h-11 bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200" disabled={signUpMutation.isPending}>
+                                        <SelectValue placeholder="Select your role" />
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="ADMIN">Admin</SelectItem>
@@ -165,16 +210,19 @@ export const RegisterForm = () => {
                                 <div className="relative flex items-center">
                                     <Input
                                         type={showPassword ? "text" : "password"}
-                                        placeholder="Password must be atleast 6 characters"
+                                        placeholder="Password must be at least 6 characters"
+                                        className="h-11 px-4 pr-10 bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+                                        disabled={signUpMutation.isPending}
                                         {...field}
                                     />
                                     <button
                                         type="button"
                                         tabIndex={-1}
-                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary focus:outline-none"
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors focus:outline-none"
                                         onClick={() => setShowPassword((v) => !v)}
+                                        disabled={signUpMutation.isPending}
                                     >
-                                        {showPassword ? <Eye size={20} /> : <EyeOff size={20} />}
+                                        {showPassword ? <Eye size={18} /> : <EyeOff size={18} />}
                                     </button>
                                 </div>
                             </FormControl>
@@ -182,8 +230,22 @@ export const RegisterForm = () => {
                         </FormItem>
                     )}
                 />
-                <Button type="submit" size="lg" className="w-full">
-                    Sign up
+                <FormError message={error} />
+                <FormSuccess message={success} />
+                
+                <Button 
+                    type="submit" 
+                    className="w-full h-11 bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-600/90 text-white font-medium rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 disabled:transform-none disabled:hover:shadow-md"
+                    disabled={signUpMutation.isPending}
+                >
+                    {signUpMutation.isPending ? (
+                        <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Creating account...
+                        </>
+                    ) : (
+                        "Create Account"
+                    )}
                 </Button>
             </form>
         </Form>
