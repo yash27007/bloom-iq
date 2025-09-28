@@ -29,6 +29,7 @@ CREATE TABLE "public"."users" (
     "email" TEXT NOT NULL,
     "designation" "public"."Designation" NOT NULL,
     "role" "public"."Role" NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -109,19 +110,6 @@ CREATE TABLE "public"."question_generation_job" (
     CONSTRAINT "question_generation_job_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "public"."document_chunks" (
-    "id" TEXT NOT NULL,
-    "materialId" TEXT NOT NULL,
-    "chunkIndex" INTEGER NOT NULL,
-    "content" TEXT NOT NULL,
-    "embedding" vector(3072) NOT NULL,
-    "metadata" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "document_chunks_pkey" PRIMARY KEY ("id")
-);
-
 -- CreateIndex
 CREATE UNIQUE INDEX "users_facultyId_key" ON "public"."users"("facultyId");
 
@@ -148,9 +136,6 @@ CREATE INDEX "question_feedback_questionId_id_idx" ON "public"."question_feedbac
 
 -- CreateIndex
 CREATE INDEX "question_generation_job_courseId_materialId_idx" ON "public"."question_generation_job"("courseId", "materialId");
-
--- CreateIndex
-CREATE INDEX "document_chunks_materialId_chunkIndex_idx" ON "public"."document_chunks"("materialId", "chunkIndex");
 
 -- AddForeignKey
 ALTER TABLE "public"."courses" ADD CONSTRAINT "courses_courseCoordinatorId_fkey" FOREIGN KEY ("courseCoordinatorId") REFERENCES "public"."users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -181,6 +166,3 @@ ALTER TABLE "public"."question_generation_job" ADD CONSTRAINT "question_generati
 
 -- AddForeignKey
 ALTER TABLE "public"."question_generation_job" ADD CONSTRAINT "question_generation_job_initiatedById_fkey" FOREIGN KEY ("initiatedById") REFERENCES "public"."users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "public"."document_chunks" ADD CONSTRAINT "document_chunks_materialId_fkey" FOREIGN KEY ("materialId") REFERENCES "public"."course_material"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
