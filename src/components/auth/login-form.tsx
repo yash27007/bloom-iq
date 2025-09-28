@@ -48,7 +48,7 @@ export const LoginForm = () => {
                 redirect: false,
             });
 
-            if (result?.ok) {
+            if (result?.ok && !result?.error) {
                 setSuccess("Login successful! Redirecting...");
 
                 // Get user data from session to determine redirect
@@ -63,11 +63,12 @@ export const LoginForm = () => {
                     router.push("/dashboard");
                 }
             } else {
-                setError(result?.error || "Invalid credentials");
+                // Handle authentication failure
+                setError("Invalid email or password. Please check your credentials and try again.");
             }
         } catch (error) {
             console.error("Login error:", error);
-            setError("An unexpected error occurred");
+            setError("An unexpected error occurred. Please try again later.");
         } finally {
             setIsLoading(false);
         }

@@ -6,8 +6,6 @@ import { PrismaClientKnownRequestError } from "@/generated/prisma/runtime/librar
 import { TRPCError } from "@trpc/server";
 export const userRouter = createTRPCRouter({
   signUp: baseProcedure.input(signUpSchema).mutation(async ({ input }) => {
-    console.log("Signning in the user");
-    console.log("User data:", input);
     try {
       await prisma.user.create({
         data: {

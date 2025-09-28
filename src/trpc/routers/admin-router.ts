@@ -31,7 +31,7 @@ const roleArray = Object.values(Role) as [Role, ...Role[]];
 // Generic list input (page, limit, search, sorting)
 const baseListInput = z.object({
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(10),
+  limit: z.number().int().min(1).max(500).default(10), // Increased max limit for scalability
   search: z.string().trim().optional(),
   sortBy: z.string().optional(),
   sortOrder: z.enum(["asc", "desc"]).default("desc"),
@@ -45,6 +45,7 @@ const userSortableKeys = [
   "facultyId",
   "role",
   "designation",
+  "isActive",
   "createdAt",
   "updatedAt",
 ] as const;
@@ -108,7 +109,10 @@ const updateUserSchema = z.object({
   email: z.string().email().optional(),
   facultyId: z.string().min(2).max(100).optional(),
   role: z.enum(roleArray).optional(),
-  designation: z.enum(["ASSISTANT_PROFESSOR", "ASSOCIATE_PROFESSOR", "PROFESSOR"]).optional(),
+  designation: z
+    .enum(["ASSISTANT_PROFESSOR", "ASSOCIATE_PROFESSOR", "PROFESSOR"])
+    .optional(),
+  isActive: z.boolean().optional(),
 });
 
 const listUsersInput = baseListInput.extend({
@@ -167,7 +171,7 @@ const bulkIdsSchema = z.object({
  */
 
 /*
- * Validates that provided coordinator IDs exist and have the correct Role.
+ * Validates that provided coordinator IDs exist, have the correct Role, and are active.
  * Throws TRPCError on mismatch.
  */
 async function validateCoordinatorRoles(input: {
@@ -185,7 +189,13 @@ async function validateCoordinatorRoles(input: {
 
   const found = await prisma.user.findMany({
     where: { id: { in: ids } },
-    select: { id: true, role: true },
+    select: {
+      id: true,
+      role: true,
+      isActive: true,
+      firstName: true,
+      lastName: true,
+    },
   });
 
   if (found.length !== ids.length) {
@@ -201,11 +211,19 @@ async function validateCoordinatorRoles(input: {
     expectedRoleById[input.programCoordinatorId] = Role.PROGRAM_COORDINATOR;
 
   for (const u of found) {
+    // Check if user is active
+    if (!u.isActive) {
+      fail(
+        "BAD_REQUEST",
+        `Cannot assign inactive user ${u.firstName} ${u.lastName} as coordinator.`
+      );
+    }
+
     const expected = expectedRoleById[u.id];
     if (expected && u.role !== expected) {
       fail(
         "BAD_REQUEST",
-        `User ${u.id} must have role ${expected}, found ${u.role}.`
+        `User ${u.firstName} ${u.lastName} must have role ${expected}, found ${u.role}.`
       );
     }
   }
@@ -248,6 +266,7 @@ export const adminRouter = createTRPCRouter({
           facultyId: true,
           role: true,
           designation: true,
+          isActive: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -313,6 +332,7 @@ export const adminRouter = createTRPCRouter({
           facultyId: true,
           role: true,
           designation: true,
+          isActive: true,
           createdAt: true,
           updatedAt: true,
           // Include course relationships
@@ -355,6 +375,7 @@ export const adminRouter = createTRPCRouter({
           facultyId: true,
           role: true,
           designation: true,
+          isActive: true,
           createdAt: true,
           updatedAt: true,
           // minimal related signals for context
@@ -376,7 +397,7 @@ export const adminRouter = createTRPCRouter({
     }),
 
   /**
-   * Update user fields (firstName, lastName, email, facultyId, role).
+   * Update user fields (firstName, lastName, email, facultyId, role, designation, isActive).
    *
    * - filters undefined keys to avoid accidental overwrites
    * - handles unique constraints
@@ -393,6 +414,7 @@ export const adminRouter = createTRPCRouter({
       if (rest.facultyId !== undefined) data.facultyId = rest.facultyId;
       if (rest.role !== undefined) data.role = rest.role;
       if (rest.designation !== undefined) data.designation = rest.designation;
+      if (rest.isActive !== undefined) data.isActive = rest.isActive;
 
       if (Object.keys(data).length === 0)
         fail("BAD_REQUEST", "No valid fields provided for update.");
@@ -409,6 +431,7 @@ export const adminRouter = createTRPCRouter({
             facultyId: true,
             role: true,
             designation: true,
+            isActive: true,
             updatedAt: true,
           },
         });
@@ -931,15 +954,17 @@ export const adminRouter = createTRPCRouter({
   /**
    * Fetch users eligible to be coordinators.
    *
+   * - Only returns active users
    * - Optional `role` filter (e.g., only COURSE_COORDINATOR)
    * - Sorted by firstName, lastName ASC for nice dropdowns
    */
   getEligibleCoordinators: adminProcedure
     .input(eligibleCoordinatorInput)
     .query(async ({ input }) => {
-      const where: Prisma.UserWhereInput = input.role
-        ? { role: input.role }
-        : {};
+      const where: Prisma.UserWhereInput = {
+        isActive: true, // Only active users can be coordinators
+        ...(input.role ? { role: input.role } : {}),
+      };
 
       const coordinators = await prisma.user.findMany({
         where,
@@ -950,6 +975,7 @@ export const adminRouter = createTRPCRouter({
           email: true,
           facultyId: true,
           role: true,
+          isActive: true,
         },
         orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
       });
