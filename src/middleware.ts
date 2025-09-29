@@ -1,11 +1,11 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { 
-  canAccessAdminRoutes, 
-  canAccessCoordinatorRoutes, 
-  getDashboardRoute, 
-  type UserRole 
+import {
+  canAccessAdminRoutes,
+  canAccessCoordinatorRoutes,
+  getDashboardRoute,
+  type UserRole,
 } from "@/lib/auth-utils";
 
 export async function middleware(request: NextRequest) {
@@ -25,8 +25,8 @@ export async function middleware(request: NextRequest) {
   ];
 
   // Check if the route is public or starts with a public path
-  const isPublicRoute = publicRoutes.some(route => 
-    pathname === route || pathname.startsWith(`${route}/`)
+  const isPublicRoute = publicRoutes.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
   );
 
   if (isPublicRoute) {
@@ -38,6 +38,11 @@ export async function middleware(request: NextRequest) {
     const signInUrl = new URL("/sign-in", request.url);
     signInUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(signInUrl);
+  }
+
+  // Check if user account is active
+  if (!session.user.isActive) {
+    return NextResponse.redirect(new URL("/unauthorized", request.url));
   }
 
   // Role-based route protection

@@ -12,6 +12,7 @@ declare module "next-auth" {
       firstName: string;
       lastName: string;
       designation: string;
+      isActive: boolean;
     } & DefaultSession["user"];
   }
 
@@ -23,6 +24,7 @@ declare module "next-auth" {
     lastName: string;
     designation: string;
     email: string;
+    isActive: boolean;
   }
 }
 
@@ -34,5 +36,6 @@ declare module "next-auth/jwt" {
     firstName: string;
     lastName: string;
     designation: string;
+    isActive: boolean;
   }
 }

@@ -31,7 +31,6 @@ BloomIQ is an AI-driven question paper generation platform designed to streamlin
 
 - ✅ **AI-Powered Generation**
   - Uses Google Gemini for question generation.
-  - Vertex AI for embeddings and similarity checks.
   - LangChain.js for document parsing and chunking.
   - Inngest for background job orchestration.
 
@@ -155,7 +154,7 @@ App will be available at [http://localhost:3000](http://localhost:3000)
 | Phase 1️⃣ : Setup     | Project scaffolding, Supabase Auth, Prisma setup         |
 | Phase 2️⃣ : Admin     | CRUD for Users, Roles, Courses (Admin Panel)             |
 | Phase 3️⃣ : Uploads   | PDF Upload (Course Coordinator), LangChain parsing       |
-| Phase 4️⃣ : AI Gen    | Question generation via Gemini, embeddings via Vertex AI |
+|| Phase 4️⃣ : AI Gen    | Question generation via Gemini                            |
 | Phase 5️⃣ : Review    | Workflow for question approvals                          |
 | Phase 6️⃣ : Exam Ctrl | Controller-exclusive paper generation + PDF export       |
 | Phase 7️⃣ : Jobs      | Inngest-based background processing, scheduled emails    |
