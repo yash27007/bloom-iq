@@ -180,6 +180,8 @@ export function UsersManagementClient({ initialData }: UsersManagementClientProp
                     ...(user.programCoordinatorCourses || [])
                 ];
 
+
+
                 if (allCourses.length === 0) {
                     return (
                         <div className="text-xs text-muted-foreground italic">
@@ -192,7 +194,7 @@ export function UsersManagementClient({ initialData }: UsersManagementClientProp
                 const additionalCount = allCourses.length - 1;
 
                 return (
-                    <div className="flex flex-col gap-1">
+                    <div className="flex flex-col gap-1 m-2">
                         <div className="text-sm font-medium text-foreground">
                             {displayCourse.name}
                         </div>

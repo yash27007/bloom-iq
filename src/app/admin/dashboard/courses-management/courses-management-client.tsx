@@ -118,6 +118,24 @@ export function CoursesManagementClient({ initialData, coordinators }: CoursesMa
 
     const columns: ColumnDef<ClientCourse>[] = [
         {
+            accessorKey: "course_code",
+            header: ({ column }) => (
+                <Button
+                    variant="ghost"
+                    onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+                    className="h-auto p-0 font-medium hover:bg-transparent"
+                >
+                    Course Code
+                    {column.getIsSorted() === "asc" ? " ↑" : column.getIsSorted() === "desc" ? " ↓" : ""}
+                </Button>
+            ),
+            cell: ({ row }) => (
+                <Badge variant="secondary" className="font-mono text-xs px-2 py-1">
+                    {row.getValue("course_code")}
+                </Badge>
+            ),
+        },
+        {
             accessorKey: "name",
             header: ({ column }) => (
                 <Button
@@ -125,119 +143,79 @@ export function CoursesManagementClient({ initialData, coordinators }: CoursesMa
                     onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
                     className="h-auto p-0 font-medium hover:bg-transparent"
                 >
-                    Course Details
+                    Course Name
                     {column.getIsSorted() === "asc" ? " ↑" : column.getIsSorted() === "desc" ? " ↓" : ""}
                 </Button>
             ),
-            cell: ({ row }) => {
-                const course = row.original;
-                return (
-                    <div className="flex flex-col gap-1.5">
-                        <div className="font-medium text-foreground text-sm">
-                            {course.name}
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Badge variant="secondary" className="font-mono text-xs px-2 py-0.5">
-                                {course.course_code}
-                            </Badge>
-                            {course._count && course._count.questions > 0 && (
-                                <Badge variant="outline" className="text-xs">
-                                    {course._count.questions} questions
-                                </Badge>
-                            )}
-                        </div>
-                    </div>
-                );
-            },
-        },
-        {
-            id: "coordinators",
-            header: ({ column }) => (
-                <Button
-                    variant="ghost"
-                    onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-                    className="h-auto p-0 font-medium hover:bg-transparent"
-                >
-                    Coordinators
-                    {column.getIsSorted() === "asc" ? " ↑" : column.getIsSorted() === "desc" ? " ↓" : ""}
-                </Button>
+            cell: ({ row }) => (
+                <div className="font-medium text-foreground">
+                    {row.getValue("name")}
+                </div>
             ),
-            cell: ({ row }) => {
-                const course = row.original;
-                return (
-                    <div className="flex flex-col gap-2">
-                        {/* Course Coordinator */}
-                        <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-800 font-medium">
-                                CC
-                            </Badge>
-                            {course.courseCoordinator ? (
-                                <div className="text-sm">
-                                    <span className="font-medium">{course.courseCoordinator.firstName} {course.courseCoordinator.lastName}</span>
-                                </div>
-                            ) : (
-                                <span className="text-xs text-muted-foreground italic">Not assigned</span>
-                            )}
-                        </div>
-
-                        {/* Module Coordinator */}
-                        <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-400 dark:border-green-800 font-medium">
-                                MC
-                            </Badge>
-                            {course.moduleCoordinator ? (
-                                <div className="text-sm">
-                                    <span className="font-medium">{course.moduleCoordinator.firstName} {course.moduleCoordinator.lastName}</span>
-                                </div>
-                            ) : (
-                                <span className="text-xs text-muted-foreground italic">Not assigned</span>
-                            )}
-                        </div>
-
-                        {/* Program Coordinator */}
-                        <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950 dark:text-purple-400 dark:border-purple-800 font-medium">
-                                PC
-                            </Badge>
-                            {course.programCoordinator ? (
-                                <div className="text-sm">
-                                    <span className="font-medium">{course.programCoordinator.firstName} {course.programCoordinator.lastName}</span>
-                                </div>
-                            ) : (
-                                <span className="text-xs text-muted-foreground italic">Not assigned</span>
-                            )}
-                        </div>
-                    </div>
-                );
-            },
         },
-
         {
-            id: "status",
-            header: "Setup Status",
+            id: "courseCoordinator",
+            header: "Course Coordinator",
             cell: ({ row }) => {
                 const course = row.original;
-                const hasAllCoordinators = course.courseCoordinator && course.moduleCoordinator && course.programCoordinator;
-                const totalResources = course._count.questions + course._count.material + course._count.questionGenerationJobs;
-
-                return (
-                    <div className="flex flex-col gap-2">
-                        <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${hasAllCoordinators ? 'bg-green-500' : 'bg-orange-500'}`} />
-                            <Badge
-                                variant={hasAllCoordinators ? "default" : "secondary"}
-                                className={hasAllCoordinators
-                                    ? "bg-green-100 text-green-800 border-green-200 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800 text-xs"
-                                    : "bg-orange-100 text-orange-800 border-orange-200 hover:bg-orange-100 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-800 text-xs"
-                                }
-                            >
-                                {hasAllCoordinators ? "Complete" : "Incomplete"}
-                            </Badge>
+                return course.courseCoordinator ? (
+                    <div className="flex flex-col gap-0.5">
+                        <div className="font-medium text-sm">
+                            {course.courseCoordinator.firstName} {course.courseCoordinator.lastName}
+                        </div>
+                        <div className="text-xs text-muted-foreground capitalize">
+                            {course.courseCoordinator.designation.replace(/_/g, ' ').toLowerCase()}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                            {totalResources} resource{totalResources !== 1 ? 's' : ''} available
+                            {course.courseCoordinator.email}
                         </div>
                     </div>
+                ) : (
+                    <span className="text-xs text-muted-foreground italic">Not assigned</span>
+                );
+            },
+        },
+        {
+            id: "moduleCoordinator",
+            header: "Module Coordinator",
+            cell: ({ row }) => {
+                const course = row.original;
+                return course.moduleCoordinator ? (
+                    <div className="flex flex-col gap-0.5">
+                        <div className="font-medium text-sm">
+                            {course.moduleCoordinator.firstName} {course.moduleCoordinator.lastName}
+                        </div>
+                        <div className="text-xs text-muted-foreground capitalize">
+                            {course.moduleCoordinator.designation.replace(/_/g, ' ').toLowerCase()}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                            {course.moduleCoordinator.email}
+                        </div>
+                    </div>
+                ) : (
+                    <span className="text-xs text-muted-foreground italic">Not assigned</span>
+                );
+            },
+        },
+        {
+            id: "programCoordinator",
+            header: "Program Coordinator",
+            cell: ({ row }) => {
+                const course = row.original;
+                return course.programCoordinator ? (
+                    <div className="flex flex-col gap-0.5">
+                        <div className="font-medium text-sm">
+                            {course.programCoordinator.firstName} {course.programCoordinator.lastName}
+                        </div>
+                        <div className="text-xs text-muted-foreground capitalize">
+                            {course.programCoordinator.designation.replace(/_/g, ' ').toLowerCase()}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                            {course.programCoordinator.email}
+                        </div>
+                    </div>
+                ) : (
+                    <span className="text-xs text-muted-foreground italic">Not assigned</span>
                 );
             },
         },

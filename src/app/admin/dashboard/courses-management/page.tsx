@@ -16,6 +16,7 @@ function transformToClientCourse(course: {
         lastName: string;
         email: string;
         role: string;
+        designation: string;
     } | null;
     moduleCoordinator: {
         id: string;
@@ -23,6 +24,7 @@ function transformToClientCourse(course: {
         lastName: string;
         email: string;
         role: string;
+        designation: string;
     } | null;
     programCoordinator: {
         id: string;
@@ -30,6 +32,7 @@ function transformToClientCourse(course: {
         lastName: string;
         email: string;
         role: string;
+        designation: string;
     } | null;
     _count: {
         questions: number;
