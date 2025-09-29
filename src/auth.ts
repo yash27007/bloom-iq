@@ -1,7 +1,5 @@
 import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import { prisma } from "@/lib/prisma";
-import { compare } from "bcryptjs";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
@@ -17,24 +15,33 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         }
 
         try {
-          const user = await prisma.user.findUnique({
-            where: {
-              email: credentials.email as string,
+          // Call your API route instead of using Prisma directly
+          const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+
+          const response = await fetch(`${baseUrl}/api/auth/validate`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
             },
+            body: JSON.stringify({
+              email: credentials.email,
+              password: credentials.password,
+            }),
           });
 
-          if (!user) {
+          if (!response.ok) {
+            if (response.status === 403) {
+              const errorData = await response.json();
+              // Use a specific error message that we can detect in the login form
+              throw new Error(
+                "ACCOUNT_DEACTIVATED: " +
+                  (errorData.error || "Account has been deactivated")
+              );
+            }
             throw new Error("Invalid credentials");
           }
 
-          const isPasswordValid = await compare(
-            credentials.password as string,
-            user.password
-          );
-
-          if (!isPasswordValid) {
-            throw new Error("Invalid credentials");
-          }
+          const user = await response.json();
 
           return {
             id: user.id,
@@ -44,6 +51,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             firstName: user.firstName,
             lastName: user.lastName,
             designation: user.designation,
+            isActive: user.isActive,
           };
         } catch (error) {
           console.error("Authentication error:", error);
@@ -63,6 +71,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.firstName = user.firstName;
         token.lastName = user.lastName;
         token.designation = user.designation;
+        token.isActive = user.isActive;
       }
       return token;
     },
@@ -74,6 +83,26 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         session.user.firstName = token.firstName as string;
         session.user.lastName = token.lastName as string;
         session.user.designation = token.designation as string;
+        session.user.isActive = token.isActive as boolean;
+
+        // Optionally: fetch fresh user status from database for each session check
+        // This ensures that if an admin deactivates a user, they get logged out immediately
+        // Uncomment the code below if you want real-time account status checking:
+        /*
+        try {
+          const { prisma } = require("@/lib/prisma");
+          const user = await prisma.user.findUnique({
+            where: { id: token.id as string },
+            select: { isActive: true }
+          });
+          if (user && !user.isActive) {
+            // User has been deactivated, invalidate the session
+            return null;
+          }
+        } catch (error) {
+          console.error("Error checking user status:", error);
+        }
+        */
       }
       return session;
     },
