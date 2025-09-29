@@ -109,6 +109,10 @@ export function AdvancedDataTable<TData, TValue>({
     const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
     const [rowSelection, setRowSelection] = React.useState({});
     const [globalFilter, setGlobalFilter] = React.useState("");
+    const [pagination, setPagination] = React.useState({
+        pageIndex: 0,
+        pageSize: 50,
+    });
 
     const isServerSide = props.serverSide === true;
     const serverSideProps = isServerSide ? props : null;
@@ -183,6 +187,7 @@ export function AdvancedDataTable<TData, TValue>({
         manualSorting: isServerSide,
         manualFiltering: isServerSide,
         pageCount: isServerSide ? serverSideProps?.pagination?.totalPages ?? 0 : undefined,
+        onPaginationChange: isServerSide ? undefined : setPagination,
         state: {
             sorting,
             columnFilters,
@@ -194,19 +199,26 @@ export function AdvancedDataTable<TData, TValue>({
                     pageIndex: (serverSideProps?.pagination?.page ?? 1) - 1,
                     pageSize: serverSideProps?.pagination?.limit ?? 10,
                 }
-                : {
-                    pageIndex: 0,
-                    pageSize: 10,
-                },
-        },
-        initialState: {
-            pagination: isServerSide
-                ? undefined
-                : {
-                    pageSize: 10,
-                },
+                : pagination,
         },
     });
+
+    // Debug pagination state
+    const paginationState = table.getState().pagination;
+    React.useEffect(() => {
+        if (!isServerSide) {
+            console.log('AdvancedDataTable pagination debug:', {
+                currentPageSize: paginationState.pageSize,
+                currentPageIndex: paginationState.pageIndex,
+                totalRows: data.length,
+                pageCount: table.getPageCount(),
+                canNextPage: table.getCanNextPage(),
+                canPreviousPage: table.getCanPreviousPage(),
+                isServerSide: isServerSide,
+                rowsOnCurrentPage: table.getRowModel().rows.length,
+            });
+        }
+    }, [paginationState.pageSize, paginationState.pageIndex, data.length, isServerSide, table]);
 
     const handlePageChange = React.useCallback((page: number) => {
         if (isServerSide && serverSideProps?.onPaginationChange) {
@@ -218,9 +230,9 @@ export function AdvancedDataTable<TData, TValue>({
         if (isServerSide && serverSideProps?.onPaginationChange) {
             serverSideProps.onPaginationChange(1, pageSize);
         } else {
-            table.setPageSize(pageSize);
+            setPagination(prev => ({ ...prev, pageSize, pageIndex: 0 }));
         }
-    }, [isServerSide, serverSideProps, table]);
+    }, [isServerSide, serverSideProps]);
 
     const handleFilterChange = React.useCallback((key: string, value: string) => {
         if (isServerSide && serverSideProps?.onFilterChange) {

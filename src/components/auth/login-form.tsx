@@ -63,7 +63,14 @@ export const LoginForm = () => {
                     router.push("/dashboard");
                 }
             } else {
-                // Handle authentication failure
+                // Check if the error is due to account deactivation
+                if (result?.error && result.error.includes("ACCOUNT_DEACTIVATED")) {
+                    // Redirect to unauthorized page for deactivated accounts
+                    router.push("/unauthorized");
+                    return;
+                }
+
+                // Handle other authentication failures
                 setError("Invalid email or password. Please check your credentials and try again.");
             }
         } catch (error) {

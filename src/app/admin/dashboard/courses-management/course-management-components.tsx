@@ -74,6 +74,7 @@ export interface ClientCourse {
         lastName: string;
         email: string;
         role: string;
+        designation: string;
     } | null;
     moduleCoordinator: {
         id: string;
@@ -81,6 +82,7 @@ export interface ClientCourse {
         lastName: string;
         email: string;
         role: string;
+        designation: string;
     } | null;
     programCoordinator: {
         id: string;
@@ -88,6 +90,7 @@ export interface ClientCourse {
         lastName: string;
         email: string;
         role: string;
+        designation: string;
     } | null;
     _count: {
         questions: number;

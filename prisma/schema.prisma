@@ -36,9 +36,9 @@ model Course {
   course_code            String                    @unique
   name                   String
   description            String
-  courseCoordinatorId    String
-  moduleCoordinatorId    String
-  programCoordinatorId   String
+  courseCoordinatorId    String                    @unique
+  moduleCoordinatorId    String                    @unique
+  programCoordinatorId   String                    @unique
   createdAt              DateTime                  @default(now())
   updatedAt              DateTime                  @updatedAt
   material               Course_Material[]

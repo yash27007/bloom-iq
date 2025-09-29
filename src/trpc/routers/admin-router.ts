@@ -675,6 +675,7 @@ export const adminRouter = createTRPCRouter({
                 lastName: true,
                 email: true,
                 role: true,
+                designation: true,
               },
             },
             moduleCoordinator: {
@@ -684,6 +685,7 @@ export const adminRouter = createTRPCRouter({
                 lastName: true,
                 email: true,
                 role: true,
+                designation: true,
               },
             },
             programCoordinator: {
@@ -693,6 +695,7 @@ export const adminRouter = createTRPCRouter({
                 lastName: true,
                 email: true,
                 role: true,
+                designation: true,
               },
             },
             _count: {

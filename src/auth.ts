@@ -32,7 +32,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           if (!response.ok) {
             if (response.status === 403) {
               const errorData = await response.json();
-              throw new Error(errorData.error || "Account deactivated");
+              // Use a specific error message that we can detect in the login form
+              throw new Error(
+                "ACCOUNT_DEACTIVATED: " +
+                  (errorData.error || "Account has been deactivated")
+              );
             }
             throw new Error("Invalid credentials");
           }
@@ -80,6 +84,25 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         session.user.lastName = token.lastName as string;
         session.user.designation = token.designation as string;
         session.user.isActive = token.isActive as boolean;
+
+        // Optionally: fetch fresh user status from database for each session check
+        // This ensures that if an admin deactivates a user, they get logged out immediately
+        // Uncomment the code below if you want real-time account status checking:
+        /*
+        try {
+          const { prisma } = require("@/lib/prisma");
+          const user = await prisma.user.findUnique({
+            where: { id: token.id as string },
+            select: { isActive: true }
+          });
+          if (user && !user.isActive) {
+            // User has been deactivated, invalidate the session
+            return null;
+          }
+        } catch (error) {
+          console.error("Error checking user status:", error);
+        }
+        */
       }
       return session;
     },
