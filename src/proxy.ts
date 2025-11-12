@@ -8,8 +8,7 @@ import {
   type UserRole,
 } from "@/lib/auth-utils";
 
-export async function middleware(request: NextRequest) {
-  const session = await auth();
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Allow access to public routes
@@ -24,6 +23,21 @@ export async function middleware(request: NextRequest) {
     "/favicon.ico",
   ];
 
+  // Routes that handle their own authentication (to avoid body consumption issues)
+  const selfAuthRoutes = [
+    "/api/upload", // File upload with FormData
+    "/api/auth", // Auth routes
+  ];
+
+  // Check if the route handles its own authentication
+  const isSelfAuthRoute = selfAuthRoutes.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
+  );
+
+  if (isSelfAuthRoute) {
+    return NextResponse.next();
+  }
+
   // Check if the route is public or starts with a public path
   const isPublicRoute = publicRoutes.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
@@ -32,6 +46,9 @@ export async function middleware(request: NextRequest) {
   if (isPublicRoute) {
     return NextResponse.next();
   }
+
+  // Now we can safely call auth() for protected routes
+  const session = await auth();
 
   // Redirect to sign-in if no session
   if (!session?.user) {

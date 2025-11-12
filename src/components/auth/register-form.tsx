@@ -1,4 +1,6 @@
 "use client"
+
+import { trpc } from "@/trpc/client";
 import {
     Form,
     FormMessage,
@@ -22,20 +24,18 @@ import { Input } from "@/components/ui/input"
 import { Button } from "../ui/button"
 import { useState } from "react"
 import { Eye, EyeOff, Loader2 } from "lucide-react"
-import { useTRPC } from "@/trpc/client"
-import { useMutation } from "@tanstack/react-query"
+// tRPC and useMutation now handled by trpc import
 import { FormError } from "@/components/auth/form-error"
 import { FormSuccess } from "@/components/auth/form-success"
 import { useRouter } from "next/navigation"
 
 export const RegisterForm = () => {
-    const trpc = useTRPC();
     const router = useRouter();
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState<string | undefined>("");
     const [success, setSuccess] = useState<string | undefined>("");
-    
-    const signUpMutation = useMutation(trpc.user.signUp.mutationOptions());
+
+    const signUpMutation = trpc.user.signUp.useMutation();
     const form = useForm<z.infer<typeof signUpSchema>>({
         resolver: zodResolver(signUpSchema),
         defaultValues: {
@@ -52,7 +52,7 @@ export const RegisterForm = () => {
     function onSubmit(values: z.infer<typeof signUpSchema>) {
         setError("");
         setSuccess("");
-        
+
         signUpMutation.mutate(values, {
             onSuccess: (data) => {
                 setSuccess(data.message);
@@ -78,12 +78,12 @@ export const RegisterForm = () => {
                             <FormItem>
                                 <FormLabel>First Name</FormLabel>
                                 <FormControl>
-                                    <Input 
-                                        type="text" 
-                                        placeholder="Enter your first name" 
+                                    <Input
+                                        type="text"
+                                        placeholder="Enter your first name"
                                         className="h-11 px-4 bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                                         disabled={signUpMutation.isPending}
-                                        {...field} 
+                                        {...field}
                                     />
                                 </FormControl>
                                 <FormMessage />
@@ -97,12 +97,12 @@ export const RegisterForm = () => {
                             <FormItem>
                                 <FormLabel>Last Name</FormLabel>
                                 <FormControl>
-                                    <Input 
-                                        type="text" 
-                                        placeholder="Enter your last name" 
+                                    <Input
+                                        type="text"
+                                        placeholder="Enter your last name"
                                         className="h-11 px-4 bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                                         disabled={signUpMutation.isPending}
-                                        {...field} 
+                                        {...field}
                                     />
                                 </FormControl>
                                 <FormMessage />
@@ -117,12 +117,12 @@ export const RegisterForm = () => {
                         <FormItem>
                             <FormLabel>Email</FormLabel>
                             <FormControl>
-                                <Input 
-                                    type="email" 
-                                    placeholder="Enter your email address" 
+                                <Input
+                                    type="email"
+                                    placeholder="Enter your email address"
                                     className="h-11 px-4 bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                                     disabled={signUpMutation.isPending}
-                                    {...field} 
+                                    {...field}
                                 />
                             </FormControl>
                             <FormMessage />
@@ -136,12 +136,12 @@ export const RegisterForm = () => {
                         <FormItem>
                             <FormLabel>Faculty Id</FormLabel>
                             <FormControl>
-                                <Input 
-                                    type="text" 
-                                    placeholder="Enter your faculty ID" 
+                                <Input
+                                    type="text"
+                                    placeholder="Enter your faculty ID"
                                     className="h-11 px-4 bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                                     disabled={signUpMutation.isPending}
-                                    {...field} 
+                                    {...field}
                                 />
                             </FormControl>
                             <FormMessage />
@@ -232,9 +232,9 @@ export const RegisterForm = () => {
                 />
                 <FormError message={error} />
                 <FormSuccess message={success} />
-                
-                <Button 
-                    type="submit" 
+
+                <Button
+                    type="submit"
                     className="w-full h-11 bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-600/90 text-white font-medium rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 disabled:transform-none disabled:hover:shadow-md"
                     disabled={signUpMutation.isPending}
                 >

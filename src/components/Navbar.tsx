@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { ThemeToggle } from "./theme-toggle";
 
 export const Navbar = async () => {
-    const session = await auth();
+    const _session = await auth();
 
     return (
         <nav className="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/60">
@@ -15,9 +15,9 @@ export const Navbar = async () => {
                     </div>
 
                     <div className="flex items-center space-x-4">
-                        <div className="text-sm text-muted-foreground">
+                        {/* <div className="text-sm text-muted-foreground">
                             Welcome back, <span className="font-medium text-foreground">{session?.user.firstName} {session?.user.lastName}</span>
-                        </div>
+                        </div> */}
                         <ThemeToggle />
                     </div>
                 </div>

@@ -39,9 +39,8 @@ import {
 } from "@/components/ui/select"
 import { AddUserSheet, EditUserDialog, DeleteUserDialog } from "./user-management-components"
 import { createColumns, UserTableData } from "./columns"
-import { useTRPC } from "@/trpc/client"
+import { trpc } from "@/trpc/client"
 import { toast } from "sonner"
-import { useMutation } from "@tanstack/react-query"
 
 interface DataTableAdvancedProps {
     initialData: UserTableData[]
@@ -59,10 +58,9 @@ export function DataTableAdvanced({ initialData }: DataTableAdvancedProps) {
     const [userToDelete, setUserToDelete] = React.useState<UserTableData | null>(null)
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false)
 
-    const trpc = useTRPC()
-    const updateUserMutation = useMutation(trpc.admin.updateUser.mutationOptions())
-    const deleteUserMutation = useMutation(trpc.admin.deleteUser.mutationOptions())
-    const addUserMutation = useMutation(trpc.admin.addUser.mutationOptions())
+    const updateUserMutation = trpc.admin.updateUser.useMutation()
+    const deleteUserMutation = trpc.admin.deleteUser.useMutation()
+    const addUserMutation = trpc.admin.addUser.useMutation()
 
     const handleEditUser = (user: UserTableData) => {
         setSelectedUser(user)

@@ -1,6 +1,6 @@
-import { initTRPC } from "@trpc/server";
+import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
-import type { Context } from "./context"; 
+import type { Context } from "./context";
 
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
@@ -32,6 +32,31 @@ const isAdmin = t.middleware(({ ctx, next }) => {
   return next();
 });
 
+const isCourseCoordinator = t.middleware(({ ctx, next }) => {
+  if (ctx.session?.user?.role !== "COURSE_COORDINATOR") {
+    throw new TRPCError({ message: "NOT AUTHORIZED", code: "UNAUTHORIZED" });
+  }
+  return next();
+});
+const isModuleCoordinator = t.middleware(({ ctx, next }) => {
+  if (ctx.session?.user?.role !== "MODULE_COORDINATOR") {
+    throw new TRPCError({ message: "NOT AUTHORIZED", code: "UNAUTHORIZED" });
+  }
+  return next();
+});
+const isProgramCoordinator = t.middleware(({ ctx, next }) => {
+  if (ctx.session?.user?.role !== "PROGRAM_COORDINATOR") {
+    throw new TRPCError({ message: "NOT AUTHORIZED", code: "UNAUTHORIZED" });
+  }
+  return next();
+});
+const isCOE = t.middleware(({ ctx, next }) => {
+  if (ctx.session?.user?.role !== "CONTROLLER_OF_EXAMINATION") {
+    throw new TRPCError({ message: "NOT AUTHORIZED", code: "UNAUTHORIZED" });
+  }
+  return next();
+});
+
 // --------------------
 // Base helpers
 // --------------------
@@ -42,3 +67,12 @@ export const createCallerFactory = t.createCallerFactory;
 export const baseProcedure = t.procedure;
 export const protectedProcedure = t.procedure.use(isAuthed);
 export const adminProcedure = t.procedure.use(isAuthed).use(isAdmin);
+export const coordinatorProcedure = t.procedure
+  .use(isAuthed)
+  .use(isCourseCoordinator);
+export const questionReviewer = t.procedure
+  .use(isAuthed)
+  .use(isModuleCoordinator)
+  .use(isProgramCoordinator)
+  .use(isCOE);
+export const controllerOfExamination = t.procedure.use(isAuthed).use(isCOE);

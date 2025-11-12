@@ -61,31 +61,51 @@ model Course_Material {
   unit                    Int                       @default(0)
   version                 Int                       @default(1)
   uploadedById            String
+  parsedContent           String? // Markdown content parsed from PDF
+  parsingStatus           Parsing_Status            @default(PENDING) // Track parsing progress
+  parsingError            String? // Store any parsing errors
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
   course                  Course                    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   uploadedBy              User                      @relation(fields: [uploadedById], references: [id])
   Question_Generation_Job Question_Generation_Job[]
+  questions               Question[]
 
   @@index([id, courseId])
   @@map("course_material")
 }
 
 model Question {
-  id           String              @id @default(uuid())
-  courseId     String
-  unit         Int                 @default(0)
-  question     String
-  answer       String
-  questionType Question_Type
-  marks        Marks
-  status       QuestionStatus      @default(CREATED_BY_COURSE_COORDINATOR)
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  feedback     Question_Feedback[] @relation("QuestionOnFeedback")
-  course       Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  id              String              @id @default(uuid())
+  courseId        String
+  materialId      String? // Reference to source material
+  unit            Int                 @default(0)
+  question        String
+  answer          String
+  questionType    Question_Type
+  difficultyLevel DifficultyLevel     @default(MEDIUM)
+  bloomLevel      BloomLevel          @default(UNDERSTAND)
+  generationType  GenerationType      @default(DIRECT)
+  marks           Marks
+  status          QuestionStatus      @default(CREATED_BY_COURSE_COORDINATOR)
+  // Review flags
+  reviewedByCc    Boolean             @default(false)
+  reviewedByMc    Boolean             @default(false)
+  reviewedByPc    Boolean             @default(false)
+  ccApprovedAt    DateTime?
+  mcApprovedAt    DateTime?
+  pcApprovedAt    DateTime?
+  // Metadata
+  materialName    String?
+  isFinalized     Boolean             @default(false)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  feedback        Question_Feedback[] @relation("QuestionOnFeedback")
+  course          Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseMaterial  Course_Material?    @relation(fields: [materialId], references: [id])
 
-  @@index([courseId, id])
+  @@index([courseId, id, status])
+  @@index([materialId])
   @@map("questions")
 }
 
@@ -139,6 +159,15 @@ enum Material_Type {
   UNIT_PDF
 }
 
+/// *
+///  * PDF parsing status for async processing
+enum Parsing_Status {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 enum Question_Type {
   REMEMBER
   ANALYZE
@@ -174,4 +203,32 @@ enum QuestionStatus {
   UNDER_REVIEW_FROM_MODULE_COORDINATOR
   ACCEPTED
   REJECTED
+}
+
+/// *
+///  * Difficulty levels for questions
+enum DifficultyLevel {
+  EASY
+  MEDIUM
+  HARD
+}
+
+/// *
+///  * Bloom's taxonomy levels for learning objectives
+enum BloomLevel {
+  REMEMBER
+  UNDERSTAND
+  APPLY
+  ANALYZE
+  EVALUATE
+  CREATE
+}
+
+/// *
+///  * Question generation types
+enum GenerationType {
+  DIRECT
+  INDIRECT
+  SCENARIO_BASED
+  PROBLEM_BASED
 }

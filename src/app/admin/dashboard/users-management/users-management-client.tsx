@@ -15,10 +15,10 @@ import {
 import { ColumnDef } from "@tanstack/react-table";
 import { AddUserSheet, EditUserDialog, DeleteUserDialog } from "./user-management-components";
 import { useState } from "react";
-import { useTRPC } from "@/trpc/client";
+import { trpc } from "@/trpc/client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { useMutation } from "@tanstack/react-query";
+// useMutation now handled by tRPC
 // Client-side User type (without sensitive fields like password)
 interface ClientUser {
     id: string;
@@ -45,10 +45,9 @@ export function UsersManagementClient({ initialData }: UsersManagementClientProp
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
     const router = useRouter();
-    const trpc = useTRPC();
-    const addUserMutation = useMutation(trpc.admin.addUser.mutationOptions());
-    const updateUserMutation = useMutation(trpc.admin.updateUser.mutationOptions());
-    const deleteUserMutation = useMutation(trpc.admin.deleteUser.mutationOptions());
+    const addUserMutation = trpc.admin.addUser.useMutation();
+    const updateUserMutation = trpc.admin.updateUser.useMutation();
+    const deleteUserMutation = trpc.admin.deleteUser.useMutation();
 
     const columns: ColumnDef<ClientUser>[] = [
         {
