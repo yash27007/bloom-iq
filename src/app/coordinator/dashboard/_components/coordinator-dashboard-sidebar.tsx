@@ -65,19 +65,24 @@ const navigationItems = {
     ],
     questionPaper: [
         {
-            title: "Review Questions",
-            url: "/coordinator/dashboard/question-paper/review-questions",
-            icon: FileCheck,
+            title: "Question Bank",
+            url: "/coordinator/dashboard/question-paper/question-bank",
+            icon: SiBookstack,
         },
         {
-            title: "Set Paper Layout",
-            url: "/coordinator/dashboard/question-paper/set-paper-layout",
+            title: "Create Pattern",
+            url: "/coordinator/dashboard/question-paper/create-pattern",
             icon: Layout,
         },
         {
-            title: "Review and Print Paper",
-            url: "/coordinator/dashboard/question-paper/print",
+            title: "View Patterns",
+            url: "/coordinator/dashboard/question-paper/patterns",
             icon: FaFilePen,
+        },
+        {
+            title: "Approve Patterns",
+            url: "/coordinator/dashboard/question-paper/approve-patterns",
+            icon: FileCheck,
         }
     ]
 };

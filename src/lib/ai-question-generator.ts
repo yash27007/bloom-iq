@@ -1,9 +1,8 @@
 /**
  * AI Question Generation Service
  *
- * This service handles generating questions from course material content
- * using AI models. Currently uses a placeholder implementation but can
- * be extended to use external AI services like Ollama with gemma3:4b.
+ * Uses Docker Model Runner with ai/gemma3:4B model
+ * API Reference: https://docs.docker.com/ai/model-runner/api-reference/
  */
 
 export interface QuestionGenerationParams {
@@ -51,151 +50,426 @@ export interface GeneratedQuestion {
 }
 
 /**
- * System prompt for AI question generation
+ * Get Docker Model Runner endpoint
+ * From container: http://model-runner.docker.internal/
+ * From host: http://localhost:12434/
  */
-const _SYSTEM_PROMPT = `
-You are an expert educational assistant tasked with generating high-quality assessment questions from academic course materials. You will receive parsed course content in Markdown format, along with metadata such as course name, unit number, and material type. Your goal is to generate questions that are pedagogically sound, categorized by Bloom's taxonomy, difficulty level, and question type.
+function getModelRunnerUrl(): string {
+  // Check if running in Docker container
+  const envUrl = process.env.DOCKER_MODEL_RUNNER_URL;
+  if (envUrl) {
+    return envUrl;
+  }
 
-Difficulty Level Guidelines:
-- Easy: Recall-based, straightforward questions. Typically aligned with Bloom's "Remember" or "Understand".
-- Medium: Requires comprehension and application. May involve basic problem-solving or interpretation.
-- Hard: Requires analysis, synthesis, or evaluation. Often open-ended or multi-step.
-
-Bloom's Taxonomy Examples:
-- Remember: Define concepts, list facts
-- Understand: Explain concepts using examples
-- Apply: Use concepts to solve problems
-- Analyze: Compare and contrast, break down components
-- Evaluate: Assess validity, make judgments
-- Create: Design solutions, formulate new ideas
-
-Question Type Examples:
-- Direct: Straightforward questions asking for specific information
-- Indirect: Questions that require inference or interpretation
-- Scenario-based: Questions set in real-world contexts
-- Problem-based: Questions requiring multi-step problem solving
-
-Generate questions that are clear, unambiguous, and aligned with the specified parameters.
-`;
+  // Default to internal Docker network
+  return "http://model-runner.docker.internal";
+}
 
 /**
- * Generate questions using AI service
- *
- * TODO: Replace this placeholder with actual AI model integration
- * Options:
- * 1. Docker-based Ollama with gemma3:4b
- * 2. OpenAI API
- * 3. Other LLM providers
+ * System prompt for AI question generation
+ * Based on: MANGALAM ACADEMY OF HIGHER EDUCATION question paper format
+ */
+const SYSTEM_PROMPT = `You are an expert educational assessment designer for MANGALAM ACADEMY OF HIGHER EDUCATION. Your task is to generate high-quality university examination questions following strict academic standards.
+
+QUESTION PAPER FORMAT (University Standard):
+Part A: Short Answer Questions (CO Mapping)
+Part B: Essay Questions (CO Mapping)
+
+QUESTION STRUCTURE REQUIREMENTS:
+1. Each question MUST clearly state:
+   - Question text (clear, unambiguous, academically rigorous)
+   - Complete answer (detailed, accurate, pedagogically sound)
+   - Marks allocation (2, 8, or 16 marks)
+   - Course Outcome (CO) mapping
+   - Bloom's Taxonomy level
+   - Difficulty level
+
+2. MARKS ALLOCATION GUIDELINES:
+   - TWO marks: Short answer, definition, list, brief explanation (50-100 words)
+     * Examples: "Define X", "List the types of Y", "What is Z?"
+   - EIGHT marks: Detailed explanation, comparison, problem solving (400-600 words)
+     * Examples: "Explain the process of X", "Compare Y and Z", "Demonstrate how..."
+   - SIXTEEN marks: Comprehensive analysis, design, evaluation (800-1200 words)
+     * Examples: "Analyze and evaluate X", "Design a system for Y", "Critically assess..."
+
+3. BLOOM'S TAXONOMY LEVELS (CO Mapping):
+   - REMEMBER (CO1): Define, list, recall, identify, name, state
+   - UNDERSTAND (CO1-CO2): Explain, describe, summarize, interpret, discuss, demonstrate
+   - APPLY (CO2-CO3): Calculate, solve, implement, use, demonstrate, show
+   - ANALYZE (CO3-CO4): Compare, contrast, examine, break down, differentiate, investigate
+   - EVALUATE (CO4-CO5): Assess, judge, critique, justify, recommend, argue
+   - CREATE (CO5): Design, formulate, construct, propose, develop, plan
+
+4. QUESTION TYPES:
+   - DIRECT: Straightforward questions ("Define...", "What is...", "List...")
+   - INDIRECT: Inferential questions ("Explain how...", "Why does...", "What would happen if...")
+   - SCENARIO_BASED: Real-world application with context ("Given a scenario where...", "In a situation...")
+   - PROBLEM_BASED: Multi-step problem solving ("Solve the following...", "Design a solution...", "Develop an algorithm...")
+
+5. DIFFICULTY LEVELS:
+   - EASY: Recall and basic understanding (typically CO1, 2 marks)
+     * Focus on definitions, basic concepts, simple facts
+   - MEDIUM: Application and analysis (typically CO2-CO4, 8 marks)
+     * Requires understanding, application, comparison
+   - HARD: Evaluation and creation (typically CO4-CO5, 16 marks)
+     * Demands critical thinking, synthesis, original solutions
+
+6. ANSWER REQUIREMENTS:
+   - Answers must be complete, accurate, and exam-ready
+   - Include key points, explanations, examples, diagrams (where appropriate)
+   - Match the marks allocation exactly (2 marks = 50-100 words, 8 marks = 400-600 words, 16 marks = 800-1200 words)
+   - Use academic language, proper terminology, and structured format
+   - Provide sufficient detail for a student to score full marks
+
+RESPONSE FORMAT:
+You MUST respond with ONLY a valid JSON array. NO additional text, NO markdown, NO explanations.
+Each question object must have ALL these fields:
+{
+  "question_text": "Complete question with proper academic phrasing",
+  "answer_text": "Complete, detailed answer suitable for exam evaluation",
+  "marks": "TWO" | "EIGHT" | "SIXTEEN",
+  "difficulty_level": "EASY" | "MEDIUM" | "HARD",
+  "bloom_level": "REMEMBER" | "UNDERSTAND" | "APPLY" | "ANALYZE" | "EVALUATE" | "CREATE",
+  "question_type": "DIRECT" | "INDIRECT" | "SCENARIO_BASED" | "PROBLEM_BASED",
+  "unit_number": <number>,
+  "course_name": "<course name>",
+  "material_name": "<material name>"
+}
+
+QUALITY STANDARDS:
+✓ Questions must be grammatically correct and professionally formatted
+✓ Avoid ambiguous, trick, or poorly worded questions
+✓ Ensure answers are complete and verifiable from the source material
+✓ Maintain academic integrity and appropriate difficulty progression
+✓ Balance coverage across different topics in the material
+✓ Use clear, precise language suitable for university-level assessment
+
+CRITICAL: Return ONLY the JSON array. Do not include \`\`\`json or any other text.`;
+
+/**
+ * Generate questions using Docker Model Runner OpenAI-compatible API
  */
 export async function generateQuestionsWithAI(
   params: QuestionGenerationParams
 ): Promise<GeneratedQuestion[]> {
-  // Placeholder implementation - replace with actual AI service
-  const questions: GeneratedQuestion[] = [];
+  const baseUrl = getModelRunnerUrl();
+  const modelName = process.env.DEFAULT_AI_MODEL || "ai/gemma3:4B";
 
-  // Calculate distribution of questions
+  // Build user prompt with detailed requirements
+  const userPrompt = buildUserPrompt(params);
+
+  console.log("🤖 Generating questions with AI model:", modelName);
+  console.log("📡 Using endpoint:", baseUrl);
+
+  try {
+    // Use OpenAI-compatible chat completions endpoint
+    // Docs: https://docs.docker.com/ai/model-runner/api-reference/#available-openai-endpoints
+    const response = await fetch(
+      `${baseUrl}/engines/llama.cpp/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [
+            {
+              role: "system",
+              content: SYSTEM_PROMPT,
+            },
+            {
+              role: "user",
+              content: userPrompt,
+            },
+          ],
+          temperature: 0.7,
+          max_tokens: 16000, // Large context for detailed responses
+          top_p: 0.9,
+          stream: false,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("❌ Model Runner API error:", errorText);
+      throw new Error(
+        `Model Runner API error: ${response.status} - ${errorText}`
+      );
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+
+    if (!content) {
+      throw new Error("No content in Model Runner response");
+    }
+
+    console.log("✅ Received response from AI model");
+
+    // Parse JSON response
+    const questions = parseAIResponse(content);
+
+    console.log(`✅ Successfully parsed ${questions.length} questions`);
+
+    // Validate and return
+    return questions.map((q) => ({
+      ...q,
+      unit_number: params.unit,
+      course_name: params.courseName,
+      material_name: params.materialName,
+    }));
+  } catch (error) {
+    console.error("❌ AI question generation error:", error);
+
+    // Fallback to mock questions in development
+    if (process.env.NODE_ENV === "development") {
+      console.warn("⚠️ Falling back to mock questions");
+      return generateMockQuestions(params);
+    }
+
+    throw new Error(
+      `Failed to generate questions: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`
+    );
+  }
+}
+
+/**
+ * Build detailed user prompt with all parameters
+ */
+function buildUserPrompt(params: QuestionGenerationParams): string {
+  const {
+    materialContent,
+    courseName,
+    materialName,
+    unit,
+    questionCounts,
+    bloomLevels,
+    questionTypes,
+  } = params;
+
   const totalQuestions =
-    params.questionCounts.easy +
-    params.questionCounts.medium +
-    params.questionCounts.hard;
+    questionCounts.easy + questionCounts.medium + questionCounts.hard;
 
-  if (totalQuestions === 0) {
-    return questions;
-  }
+  // Truncate material content if too long (keep within context window)
+  const maxContentLength = 50000; // characters
+  const truncatedContent =
+    materialContent.length > maxContentLength
+      ? materialContent.substring(0, maxContentLength) +
+        "\n\n[Content truncated for length...]"
+      : materialContent;
 
-  // Generate easy questions
-  for (let i = 0; i < params.questionCounts.easy; i++) {
-    questions.push({
-      question_text: `What is the main concept discussed in "${
-        params.materialName
-      }"? (Easy Question ${i + 1})`,
-      answer_text: `The main concept relates to the fundamental principles covered in unit ${params.unit} of ${params.courseName}.`,
-      difficulty_level: "EASY",
-      bloom_level: "REMEMBER",
-      question_type: "DIRECT",
-      marks: "TWO",
-      unit_number: params.unit,
-      course_name: params.courseName,
-      material_name: params.materialName,
+  return `Generate exactly ${totalQuestions} university examination questions based on the following course material.
+
+COURSE INFORMATION:
+- Course: ${courseName}
+- Material: ${materialName}
+- Unit: ${unit}
+
+DISTRIBUTION REQUIREMENTS:
+Difficulty Levels:
+- Easy: ${questionCounts.easy} questions (2 marks each - short answer)
+- Medium: ${questionCounts.medium} questions (8 marks each - detailed explanation)
+- Hard: ${questionCounts.hard} questions (16 marks each - comprehensive analysis)
+
+Bloom's Taxonomy Distribution:
+- Remember: ${bloomLevels.remember} questions
+- Understand: ${bloomLevels.understand} questions
+- Apply: ${bloomLevels.apply} questions
+- Analyze: ${bloomLevels.analyze} questions
+- Evaluate: ${bloomLevels.evaluate} questions
+- Create: ${bloomLevels.create} questions
+
+Question Types:
+- Direct: ${questionTypes.direct} questions
+- Indirect: ${questionTypes.indirect} questions
+- Scenario-based: ${questionTypes.scenarioBased} questions
+- Problem-based: ${questionTypes.problemBased} questions
+
+COURSE MATERIAL CONTENT:
+${truncatedContent}
+
+INSTRUCTIONS:
+1. Generate EXACTLY ${totalQuestions} questions that match the distribution requirements
+2. Base ALL questions strictly on the provided course material
+3. Provide COMPLETE, DETAILED answers for each question
+4. Ensure answers match the marks allocation (2/8/16 marks)
+5. Return ONLY a valid JSON array with NO additional text
+6. Each question object must include all required fields
+
+Generate the questions now.`;
+}
+
+/**
+ * Parse AI response and extract questions
+ */
+function parseAIResponse(content: string): GeneratedQuestion[] {
+  try {
+    // Remove markdown code fences if present
+    let cleaned = content.trim();
+
+    // Remove various markdown wrappers
+    if (cleaned.startsWith("```json")) {
+      cleaned = cleaned.substring(7);
+    } else if (cleaned.startsWith("```")) {
+      cleaned = cleaned.substring(3);
+    }
+
+    if (cleaned.endsWith("```")) {
+      cleaned = cleaned.substring(0, cleaned.length - 3);
+    }
+
+    cleaned = cleaned.trim();
+
+    // Try to find JSON array if wrapped in text
+    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      cleaned = jsonMatch[0];
+    }
+
+    // Parse JSON
+    const questions = JSON.parse(cleaned);
+
+    if (!Array.isArray(questions)) {
+      throw new Error("Response is not an array");
+    }
+
+    if (questions.length === 0) {
+      throw new Error("No questions generated");
+    }
+
+    // Validate and normalize each question
+    return questions.map((q, index) => {
+      if (!q.question_text || !q.answer_text) {
+        throw new Error(
+          `Question ${
+            index + 1
+          } missing required fields (question_text or answer_text)`
+        );
+      }
+
+      return {
+        question_text: String(q.question_text).trim(),
+        answer_text: String(q.answer_text).trim(),
+        difficulty_level: (
+          q.difficulty_level || "MEDIUM"
+        ).toUpperCase() as GeneratedQuestion["difficulty_level"],
+        bloom_level: (
+          q.bloom_level || "UNDERSTAND"
+        ).toUpperCase() as GeneratedQuestion["bloom_level"],
+        question_type: (q.question_type || "DIRECT")
+          .toUpperCase()
+          .replace(/-/g, "_") as GeneratedQuestion["question_type"],
+        marks: (q.marks || "EIGHT").toUpperCase() as GeneratedQuestion["marks"],
+        unit_number: q.unit_number || 0,
+        course_name: q.course_name || "",
+        material_name: q.material_name || "",
+      };
     });
+  } catch (error) {
+    console.error("❌ Failed to parse AI response:", error);
+    console.error("Raw content (first 500 chars):", content.substring(0, 500));
+    throw new Error(
+      `Invalid JSON response from AI model: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`
+    );
   }
+}
 
-  // Generate medium questions
-  for (let i = 0; i < params.questionCounts.medium; i++) {
-    questions.push({
-      question_text: `Explain how the concepts from "${
-        params.materialName
-      }" can be applied in real-world scenarios. (Medium Question ${i + 1})`,
-      answer_text: `The concepts can be applied by understanding the underlying principles and implementing them in practical situations as discussed in the material.`,
-      difficulty_level: "MEDIUM",
-      bloom_level: "UNDERSTAND",
-      question_type: "INDIRECT",
-      marks: "EIGHT",
-      unit_number: params.unit,
-      course_name: params.courseName,
-      material_name: params.materialName,
-    });
-  }
+/**
+ * Fallback/mock question generator for development
+ * Used when AI service is not available
+ */
+export function generateMockQuestions(
+  params: QuestionGenerationParams
+): GeneratedQuestion[] {
+  const questions: GeneratedQuestion[] = [];
+  let questionNumber = 1;
 
-  // Generate hard questions
-  for (let i = 0; i < params.questionCounts.hard; i++) {
-    questions.push({
-      question_text: `Analyze and evaluate the effectiveness of the methodologies presented in "${
-        params.materialName
-      }". Provide a critical assessment with examples. (Hard Question ${
-        i + 1
-      })`,
-      answer_text: `A comprehensive analysis should consider multiple factors including theoretical foundation, practical applicability, limitations, and comparative advantages as outlined in the course material.`,
-      difficulty_level: "HARD",
-      bloom_level: "ANALYZE",
-      question_type: "SCENARIO_BASED",
-      marks: "SIXTEEN",
-      unit_number: params.unit,
-      course_name: params.courseName,
-      material_name: params.materialName,
-    });
-  }
+  const {
+    courseName,
+    materialName,
+    unit,
+    questionCounts,
+    bloomLevels,
+    questionTypes,
+  } = params;
+
+  // Helper functions
+  const getMarksForDifficulty = (
+    difficulty: GeneratedQuestion["difficulty_level"]
+  ): GeneratedQuestion["marks"] => {
+    if (difficulty === "EASY") return "TWO";
+    if (difficulty === "MEDIUM") return "EIGHT";
+    return "SIXTEEN";
+  };
+
+  const bloomLevelArray: GeneratedQuestion["bloom_level"][] = [
+    "REMEMBER",
+    "UNDERSTAND",
+    "APPLY",
+    "ANALYZE",
+    "EVALUATE",
+    "CREATE",
+  ];
+  const questionTypeArray: GeneratedQuestion["question_type"][] = [
+    "DIRECT",
+    "INDIRECT",
+    "SCENARIO_BASED",
+    "PROBLEM_BASED",
+  ];
+
+  // Generate questions by difficulty
+  const generateByDifficulty = (
+    difficulty: GeneratedQuestion["difficulty_level"],
+    count: number
+  ) => {
+    for (let i = 0; i < count; i++) {
+      const bloom = bloomLevelArray[i % bloomLevelArray.length];
+      const type = questionTypeArray[i % questionTypeArray.length];
+      const marks = getMarksForDifficulty(difficulty);
+
+      let question_text = "";
+      let answer_text = "";
+
+      // Generate appropriate question and answer based on difficulty
+      if (difficulty === "EASY") {
+        question_text = `[Mock ${difficulty}] Define the key concepts from ${materialName} related to ${courseName}. (Question ${questionNumber})`;
+        answer_text = `This is a ${marks}-mark answer. The key concepts include fundamental definitions and basic principles as covered in Unit ${unit}.`;
+      } else if (difficulty === "MEDIUM") {
+        question_text = `[Mock ${difficulty}] Explain how the concepts from ${materialName} can be applied in practical scenarios. Provide examples. (Question ${questionNumber})`;
+        answer_text = `This is a ${marks}-mark answer requiring detailed explanation. The concepts can be applied by understanding underlying principles and implementing them systematically, as demonstrated in the course material from Unit ${unit}.`;
+      } else {
+        question_text = `[Mock ${difficulty}] Critically analyze and evaluate the methodologies presented in ${materialName}. Design a comprehensive solution addressing potential limitations. (Question ${questionNumber})`;
+        answer_text = `This is a ${marks}-mark answer requiring comprehensive analysis. A thorough evaluation must consider theoretical foundations, practical implications, comparative analysis, identified limitations, and proposed solutions, all grounded in the material from Unit ${unit} of ${courseName}.`;
+      }
+
+      questions.push({
+        question_text,
+        answer_text,
+        difficulty_level: difficulty,
+        bloom_level: bloom,
+        question_type: type,
+        marks,
+        unit_number: unit,
+        course_name: courseName,
+        material_name: materialName,
+      });
+
+      questionNumber++;
+    }
+  };
+
+  // Generate questions
+  generateByDifficulty("EASY", questionCounts.easy);
+  generateByDifficulty("MEDIUM", questionCounts.medium);
+  generateByDifficulty("HARD", questionCounts.hard);
 
   return questions;
-}
-
-/**
- * Call external AI service (placeholder for Docker/Ollama integration)
- */
-async function _callAIService(
-  _prompt: string,
-  _materialContent: string
-): Promise<string> {
-  // TODO: Implement actual AI service call
-  // Example for Ollama Docker setup:
-  /*
-  const response = await fetch('http://localhost:11434/api/generate', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'gemma3:4b',
-      prompt: `${SYSTEM_PROMPT}\n\nCourse Material:\n${materialContent}\n\nUser Request:\n${prompt}`,
-      stream: false,
-    }),
-  });
-  
-  const data = await response.json();
-  return data.response;
-  */
-
-  return "Placeholder AI response";
-}
-
-/**
- * Parse AI response into structured questions
- */
-function _parseAIResponse(_response: string): GeneratedQuestion[] {
-  // TODO: Implement proper parsing of AI-generated questions
-  // The AI should return JSON-formatted questions that match the GeneratedQuestion interface
-
-  return [];
 }
 
 /**
@@ -210,6 +484,7 @@ export function validateGeneratedQuestions(
       q.answer_text &&
       q.difficulty_level &&
       q.bloom_level &&
-      q.question_type
+      q.question_type &&
+      q.marks
   );
 }
