@@ -65,6 +65,13 @@ export default function CreatePatternPage() {
   const { data: coursesData } = trpc.coordinator.getCoursesForMaterialUpload.useQuery();
   const courses = coursesData || [];
 
+  // Set default course if available
+  useEffect(() => {
+    if (!selectedCourseId && courses.length > 0) {
+      setSelectedCourseId(courses[0].id);
+    }
+  }, [courses, selectedCourseId]);
+
   // Initialize Part A when exam type changes
   useEffect(() => {
     const count = examType === "END_SEMESTER" ? 10 : 5;
@@ -85,10 +92,10 @@ export default function CreatePatternPage() {
     const isEndSem = examType === "END_SEMESTER";
     const count = isEndSem ? 5 : 5; // 5 groups for both
     const newPartB: PartBQuestionGroup[] = [];
-    
+
     for (let i = 0; i < count; i++) {
       const groupNumber = i + 11; // Start from Q11
-      
+
       if (isEndSem) {
         // End semester with OR options
         newPartB.push({
@@ -139,7 +146,7 @@ export default function CreatePatternPage() {
   const calculateMarks = () => {
     const partATotal = partA.reduce((sum, q) => sum + q.marks, 0);
     let partBTotal = 0;
-    
+
     for (const group of partB) {
       if (group.hasOR && group.options && group.options.length > 0) {
         partBTotal += group.options[0].questionSlot.marks;
@@ -147,7 +154,7 @@ export default function CreatePatternPage() {
         partBTotal += group.questionSlot.marks;
       }
     }
-    
+
     return { partATotal, partBTotal, total: partATotal + partBTotal };
   };
 
@@ -208,7 +215,7 @@ export default function CreatePatternPage() {
   ) => {
     const newPartB = [...partB];
     const group = newPartB[groupIndex];
-    
+
     if (optionIndex !== null && group.options) {
       group.options[optionIndex].questionSlot = {
         ...group.options[optionIndex].questionSlot,
@@ -217,7 +224,7 @@ export default function CreatePatternPage() {
     } else if (group.questionSlot) {
       group.questionSlot = { ...group.questionSlot, ...updates };
     }
-    
+
     setPartB(newPartB);
   };
 
@@ -225,7 +232,7 @@ export default function CreatePatternPage() {
   const toggleSubQuestions = (groupIndex: number, optionIndex: number | null) => {
     const newPartB = [...partB];
     const group = newPartB[groupIndex];
-    
+
     let slot: PartBQuestionSlot;
     if (optionIndex !== null && group.options) {
       slot = group.options[optionIndex].questionSlot;
@@ -255,7 +262,7 @@ export default function CreatePatternPage() {
         },
       ];
     }
-    
+
     setPartB(newPartB);
   };
 
@@ -263,7 +270,7 @@ export default function CreatePatternPage() {
   const addSubQuestion = (groupIndex: number, optionIndex: number | null) => {
     const newPartB = [...partB];
     const group = newPartB[groupIndex];
-    
+
     let slot: PartBQuestionSlot;
     if (optionIndex !== null && group.options) {
       slot = group.options[optionIndex].questionSlot;
@@ -292,7 +299,7 @@ export default function CreatePatternPage() {
   ) => {
     const newPartB = [...partB];
     const group = newPartB[groupIndex];
-    
+
     let slot: PartBQuestionSlot;
     if (optionIndex !== null && group.options) {
       slot = group.options[optionIndex].questionSlot;
@@ -317,7 +324,7 @@ export default function CreatePatternPage() {
   ) => {
     const newPartB = [...partB];
     const group = newPartB[groupIndex];
-    
+
     let slot: PartBQuestionSlot;
     if (optionIndex !== null && group.options) {
       slot = group.options[optionIndex].questionSlot;
@@ -340,46 +347,46 @@ export default function CreatePatternPage() {
   const addPartBGroup = () => {
     const groupNumber = partB.length > 0 ? partB[partB.length - 1].groupNumber + 1 : 11;
     const isEndSem = examType === "END_SEMESTER";
-    
+
     const newGroup: PartBQuestionGroup = isEndSem
       ? {
-          groupNumber,
-          hasOR: true,
-          options: [
-            {
-              optionLabel: "A",
-              questionSlot: {
-                questionNumber: groupNumber,
-                marks: 16,
-                bloomLevel: "APPLY",
-                units: [1],
-                hasSubQuestions: false,
-              },
+        groupNumber,
+        hasOR: true,
+        options: [
+          {
+            optionLabel: "A",
+            questionSlot: {
+              questionNumber: groupNumber,
+              marks: 16,
+              bloomLevel: "APPLY",
+              units: [1],
+              hasSubQuestions: false,
             },
-            {
-              optionLabel: "B",
-              questionSlot: {
-                questionNumber: groupNumber,
-                marks: 16,
-                bloomLevel: "APPLY",
-                units: [1],
-                hasSubQuestions: false,
-              },
-            },
-          ],
-        }
-      : {
-          groupNumber,
-          hasOR: false,
-          questionSlot: {
-            questionNumber: groupNumber,
-            marks: 8,
-            bloomLevel: "APPLY",
-            units: [1],
-            hasSubQuestions: false,
           },
-        };
-    
+          {
+            optionLabel: "B",
+            questionSlot: {
+              questionNumber: groupNumber,
+              marks: 16,
+              bloomLevel: "APPLY",
+              units: [1],
+              hasSubQuestions: false,
+            },
+          },
+        ],
+      }
+      : {
+        groupNumber,
+        hasOR: false,
+        questionSlot: {
+          questionNumber: groupNumber,
+          marks: 8,
+          bloomLevel: "APPLY",
+          units: [1],
+          hasSubQuestions: false,
+        },
+      };
+
     setPartB([...partB, newGroup]);
   };
 

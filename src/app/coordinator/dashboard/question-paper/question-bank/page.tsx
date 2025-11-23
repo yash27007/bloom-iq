@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,8 +48,9 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
-import { Loader2, Search, Edit, Trash2, CheckCircle2, Filter } from "lucide-react";
+import { Loader2, Search, Edit, Trash2, CheckCircle2, Filter, Download, FileText } from "lucide-react";
 import { toast } from "sonner";
+import { exportQuestionsFromBank } from "@/lib/pdf-export";
 
 interface Question {
     id: string;
@@ -90,9 +91,11 @@ export default function QuestionBankPage() {
     const courses = coursesData || [];
 
     // Set default course if available
-    if (!selectedCourseId && courses.length > 0) {
-        setSelectedCourseId(courses[0].id);
-    }
+    useEffect(() => {
+        if (!selectedCourseId && courses.length > 0) {
+            setSelectedCourseId(courses[0].id);
+        }
+    }, [courses, selectedCourseId]);
 
     // Get available units for the course
     const { data: units = [] } = trpc.questionBank.getCourseUnits.useQuery(
@@ -245,6 +248,82 @@ export default function QuestionBankPage() {
                 new Set(questionsData.questions.map((q: Question) => q.id))
             );
         }
+    };
+
+    // Export handlers
+    const handleExportQuestionsOnly = () => {
+        const questionsToExport = selectedQuestions.size > 0
+            ? questions.filter(q => selectedQuestions.has(q.id))
+            : questions;
+
+        if (questionsToExport.length === 0) {
+            toast.error('No questions to export');
+            return;
+        }
+
+        const courseName = courses.find(c => c.id === selectedCourseId)?.name || 'Unknown Course';
+
+        try {
+            exportQuestionsFromBank(
+                questionsToExport.map(q => ({
+                    question: q.question,
+                    answer: q.answer,
+                    marks: q.marks,
+                    difficultyLevel: q.difficultyLevel,
+                    bloomLevel: q.bloomLevel,
+                    generationType: q.questionType,
+                    unit: q.unit
+                })),
+                courseName,
+                false, // don't include answers
+                true   // include metadata
+            );
+            toast.success(`Exporting ${questionsToExport.length} questions`);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to export');
+        }
+    };
+
+    const handleExportWithAnswers = () => {
+        const questionsToExport = selectedQuestions.size > 0
+            ? questions.filter(q => selectedQuestions.has(q.id))
+            : questions;
+
+        if (questionsToExport.length === 0) {
+            toast.error('No questions to export');
+            return;
+        }
+
+        const courseName = courses.find(c => c.id === selectedCourseId)?.name || 'Unknown Course';
+
+        try {
+            exportQuestionsFromBank(
+                questionsToExport.map(q => ({
+                    question: q.question,
+                    answer: q.answer,
+                    marks: q.marks,
+                    difficultyLevel: q.difficultyLevel,
+                    bloomLevel: q.bloomLevel,
+                    generationType: q.questionType,
+                    unit: q.unit
+                })),
+                courseName,
+                true,  // include answers
+                true   // include metadata
+            );
+            toast.success(`Exporting ${questionsToExport.length} questions with answers`);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to export');
+        }
+    };
+
+    const handleBulkDelete = () => {
+        if (selectedQuestions.size === 0) {
+            toast.error('No questions selected');
+            return;
+        }
+        // Implement bulk delete
+        toast.info('Bulk delete functionality coming soon');
     };
 
     // Get approval status badge
@@ -463,7 +542,7 @@ export default function QuestionBankPage() {
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <Button
                             variant="default"
                             onClick={handleBulkApprove}
@@ -481,9 +560,42 @@ export default function QuestionBankPage() {
                                 </>
                             )}
                         </Button>
-                        <Button variant="outline" onClick={() => setSelectedQuestions(new Set())}>
-                            Clear Selection
+
+                        <Button
+                            variant="outline"
+                            onClick={handleExportQuestionsOnly}
+                            disabled={questions.length === 0}
+                        >
+                            <FileText className="mr-2 h-4 w-4" />
+                            Export Questions Only
                         </Button>
+
+                        <Button
+                            variant="outline"
+                            onClick={handleExportWithAnswers}
+                            disabled={questions.length === 0}
+                        >
+                            <Download className="mr-2 h-4 w-4" />
+                            Export with Answers
+                        </Button>
+
+                        {selectedQuestions.size > 0 && (
+                            <>
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setSelectedQuestions(new Set())}
+                                >
+                                    Clear Selection
+                                </Button>
+                                <Button
+                                    variant="destructive"
+                                    onClick={handleBulkDelete}
+                                >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Delete Selected ({selectedQuestions.size})
+                                </Button>
+                            </>
+                        )}
                     </div>
                 </CardContent>
             </Card>

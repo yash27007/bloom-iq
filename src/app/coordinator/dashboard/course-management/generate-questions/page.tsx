@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,8 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Loader2, Plus, CheckCircle, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-
-
+import { trpc } from '@/trpc/client';
 
 // Types
 interface Course {
@@ -22,13 +22,17 @@ interface Course {
 
 interface Material {
     id: string;
+    courseId: string;
     title: string;
     unit: number;
-    courseId: string;
     course: {
         name: string;
         course_code: string;
     };
+    materialType: string;
+    parsingStatus: string;
+    parsingError: string | null;
+    hasParsedContent: boolean;
 }
 
 interface GeneratedQuestion {
@@ -41,27 +45,52 @@ interface GeneratedQuestion {
     marks: 'TWO' | 'EIGHT' | 'SIXTEEN';
     status: string;
     reviewedByCc: boolean;
-    materialName: string;
+    materialName?: string | null;
     course: {
         name: string;
         course_code: string;
     };
+    courseMaterial?: {
+        title: string;
+        unit: number;
+    } | null;
     feedback: Array<{
         id: string;
         remarks: string;
-        createdAt: string;
+        createdAt: Date;
     }>;
 }
 
 export default function GenerateQuestionsPage() {
     // State management
-    const [courses, setCourses] = useState<Course[]>([]);
-    const [materials, setMaterials] = useState<Material[]>([]);
-    const [questions, setQuestions] = useState<GeneratedQuestion[]>([]);
+    const router = useRouter();
     const [selectedCourse, setSelectedCourse] = useState<string>('');
     const [selectedMaterial, setSelectedMaterial] = useState<string>('');
-    const [loading, setLoading] = useState(true);
-    const [generating, setGenerating] = useState(false);
+
+    // tRPC queries
+    const { data: courses = [], isLoading: coursesLoading } = trpc.coordinator.getCoursesForMaterialUpload.useQuery();
+    const { data: materials = [], isLoading: materialsLoading } = trpc.coordinator.getUploadedMaterials.useQuery();
+    // Removed getGeneratedQuestions query - no need to display already generated questions on this page
+
+    // tRPC mutations
+    const generateQuestionsMutation = trpc.coordinator.generateQuestions.useMutation({
+        onSuccess: (data) => {
+            // Store generated questions in sessionStorage
+            const sessionId = Date.now().toString();
+            sessionStorage.setItem(`temp_questions_${sessionId}`, JSON.stringify(data.questions));
+            sessionStorage.setItem(`temp_metadata_${sessionId}`, JSON.stringify({
+                courseId: data.courseId,
+                materialId: data.materialId,
+                unit: data.unit
+            }));
+
+            // Redirect to review page
+            router.push(`/coordinator/dashboard/course-management/review-questions?session=${sessionId}`);
+        },
+        onError: (error) => {
+            toast.error(error.message || 'Failed to generate questions');
+        },
+    });
 
     // Question generation parameters
     const [questionCounts, setQuestionCounts] = useState({
@@ -86,152 +115,26 @@ export default function GenerateQuestionsPage() {
         problemBased: 1,
     });
 
-    // Remove tRPC mutations and use fetch-based approach
-
-    // Load data functions
-    const loadCourses = useCallback(async () => {
-        try {
-            const response = await fetch('/api/coordinator/courses');
-            if (response.ok) {
-                const data = await response.json();
-                setCourses(data.courses || []);
-            }
-        } catch (error) {
-            console.error('Failed to load courses:', error);
-            toast.error('Failed to load courses');
-        }
-    }, []);
-
-    const loadMaterials = useCallback(async () => {
-        try {
-            const response = await fetch('/api/upload/list');
-            if (response.ok) {
-                const data = await response.json();
-                setMaterials(data.materials || []);
-            }
-        } catch (_error) {
-            console.error('Failed to load materials:', _error);
-        }
-    }, []);
-
-    const loadQuestions = useCallback(async () => {
-        if (!selectedCourse) return;
-
-        try {
-            const response = await fetch(`/api/coordinator/questions?courseId=${selectedCourse}`);
-            if (response.ok) {
-                const data = await response.json();
-                setQuestions(data.questions || []);
-            }
-        } catch (_error) {
-            console.error('Failed to load questions:', _error);
-        }
-    }, [selectedCourse]);
-
-    // Load data on mount
-    useEffect(() => {
-        const loadData = async () => {
-            setLoading(true);
-            await Promise.all([loadCourses(), loadMaterials()]);
-            setLoading(false);
-        };
-        loadData();
-    }, [loadCourses, loadMaterials]);
-
-    // Load questions when course changes
-    useEffect(() => {
-        if (selectedCourse) {
-            loadQuestions();
-        }
-    }, [selectedCourse, loadQuestions]);
-
     // Filter materials by selected course
     const filteredMaterials = materials.filter(m => m.courseId === selectedCourse);
 
     // Generate questions handler
-    const handleGenerateQuestions = async () => {
+    const handleGenerateQuestions = () => {
         if (!selectedMaterial) {
             toast.error('Please select a material first');
             return;
         }
 
-        try {
-            setGenerating(true);
-            const response = await fetch('/api/coordinator/generate-questions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    materialId: selectedMaterial,
-                    questionCounts,
-                    bloomLevels,
-                    questionTypes,
-                }),
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                toast.success(result.message || 'Questions generated successfully');
-                await loadQuestions(); // Reload questions
-            } else {
-                const error = await response.json();
-                toast.error(error.error || 'Failed to generate questions');
-            }
-        } catch (_error) {
-            toast.error('Failed to generate questions');
-            console.error('Generation error:', _error);
-        } finally {
-            setGenerating(false);
-        }
+        generateQuestionsMutation.mutate({
+            materialId: selectedMaterial,
+            questionCounts,
+            bloomLevels,
+            questionTypes,
+        });
     };
 
-    // Delete question handler
-    const handleDeleteQuestion = async (questionId: string) => {
-        try {
-            const response = await fetch('/api/coordinator/questions/actions', {
-                method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ questionId }),
-            });
-
-            if (response.ok) {
-                toast.success('Question deleted successfully');
-                await loadQuestions();
-            } else {
-                const error = await response.json();
-                toast.error(error.error || 'Failed to delete question');
-            }
-        } catch (_error) {
-            toast.error('Failed to delete question');
-        }
-    };
-
-    // Approve questions handler
-    const handleApproveQuestions = async (questionIds: string[]) => {
-        try {
-            const response = await fetch('/api/coordinator/questions/actions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ questionIds }),
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                toast.success(result.message || 'Questions approved successfully');
-                await loadQuestions();
-            } else {
-                const error = await response.json();
-                toast.error(error.error || 'Failed to approve questions');
-            }
-        } catch (_error) {
-            toast.error('Failed to approve questions');
-        }
-    };
+    const loading = coursesLoading || materialsLoading;
+    const generating = generateQuestionsMutation.isPending;
 
     if (loading) {
         return (
@@ -431,101 +334,6 @@ export default function GenerateQuestionsPage() {
                                         </>
                                     )}
                                 </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
-
-                {/* Generated Questions */}
-                {questions.length > 0 && (
-                    <Card>
-                        <CardHeader>
-                            <div className="flex items-center justify-between">
-                                <CardTitle>Generated Questions ({questions.length})</CardTitle>
-                                <div className="flex gap-2">
-                                    <Button
-                                        onClick={() => handleApproveQuestions(questions.filter(q => !q.reviewedByCc).map(q => q.id))}
-                                        disabled={questions.filter(q => !q.reviewedByCc).length === 0}
-                                        variant="outline"
-                                    >
-                                        <CheckCircle className="mr-2 h-4 w-4" />
-                                        Approve All
-                                    </Button>
-                                </div>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="space-y-6">
-                                {questions.map((question) => (
-                                    <Card key={question.id} className="border-l-4 border-l-blue-500">
-                                        <CardContent className="pt-6">
-                                            <div className="space-y-4">
-                                                {/* Question Header */}
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex gap-2">
-                                                        <Badge variant={question.difficultyLevel === 'EASY' ? 'secondary' : question.difficultyLevel === 'MEDIUM' ? 'default' : 'destructive'}>
-                                                            {question.difficultyLevel}
-                                                        </Badge>
-                                                        <Badge variant="outline">{question.bloomLevel}</Badge>
-                                                        <Badge variant="outline">{question.generationType}</Badge>
-                                                        <Badge variant="outline">{question.marks} marks</Badge>
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        {question.reviewedByCc ? (
-                                                            <Badge variant="secondary">
-                                                                <CheckCircle className="mr-1 h-3 w-3" />
-                                                                Reviewed
-                                                            </Badge>
-                                                        ) : (
-                                                            <Button
-                                                                size="sm"
-                                                                onClick={() => handleApproveQuestions([question.id])}
-                                                            >
-                                                                <CheckCircle className="mr-1 h-3 w-3" />
-                                                                Approve
-                                                            </Button>
-                                                        )}
-                                                        <Button
-                                                            size="sm"
-                                                            variant="destructive"
-                                                            onClick={() => handleDeleteQuestion(question.id)}
-                                                            disabled={question.reviewedByCc}
-                                                        >
-                                                            <Trash2 className="h-3 w-3" />
-                                                        </Button>
-                                                    </div>
-                                                </div>
-
-                                                {/* Question Text */}
-                                                <div className="space-y-2">
-                                                    <Label className="text-sm font-medium">Question:</Label>
-                                                    <p className="text-sm bg-gray-50 p-3 rounded">{question.question}</p>
-                                                </div>
-
-                                                {/* Answer */}
-                                                <div className="space-y-2">
-                                                    <Label className="text-sm font-medium">Answer:</Label>
-                                                    <p className="text-sm bg-green-50 p-3 rounded">{question.answer}</p>
-                                                </div>
-
-                                                {/* Feedback */}
-                                                {question.feedback && question.feedback.length > 0 && (
-                                                    <div className="space-y-2">
-                                                        <Label className="text-sm font-medium">Feedback:</Label>
-                                                        {question.feedback.map((fb) => (
-                                                            <div key={fb.id} className="text-sm bg-yellow-50 p-3 rounded border-l-2 border-yellow-300">
-                                                                <p>{fb.remarks}</p>
-                                                                <p className="text-xs text-gray-500 mt-1">
-                                                                    {new Date(fb.createdAt).toLocaleDateString()}
-                                                                </p>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                ))}
                             </div>
                         </CardContent>
                     </Card>

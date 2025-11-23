@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/trpc/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +28,13 @@ export default function ReviewQuestionsPage() {
     // Fetch courses for the coordinator
     const { data: coursesData } = trpc.coordinator.getCoursesForMaterialUpload.useQuery();
     const courses = coursesData || [];
+
+    // Set default course if available
+    useEffect(() => {
+        if (!selectedCourseId && courses.length > 0) {
+            setSelectedCourseId(courses[0].id);
+        }
+    }, [courses, selectedCourseId]);
 
     // Fetch questions for review
     const { data: questionsData, refetch: refetchQuestions } = trpc.questionApproval.getQuestionsForReview.useQuery(

@@ -2,7 +2,7 @@
  * Question Approval Router
  *
  * Handles multi-level question approval workflow:
- * - Course Coordinator → Module Coordinator → Program Coordinator → COE
+ * - Course Coordinator -> Module Coordinator -> Program Coordinator -> COE
  * - Rejection with feedback at any stage
  * - Question editing and resubmission
  */

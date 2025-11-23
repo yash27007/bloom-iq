@@ -438,6 +438,7 @@ export const coordinatorRouter = createTRPCRouter({
 
       return materials.map((material) => ({
         id: material.id,
+        courseId: material.courseId,
         title: material.title,
         filename: material.filePath.replace("uploads/", ""),
         filePath: material.filePath,
@@ -622,6 +623,28 @@ export const coordinatorRouter = createTRPCRouter({
           });
         }
 
+        // Validate content length
+        const contentLength = material.parsedContent.trim().length;
+        console.log(`[Question Generation] Material ID: ${material.id}`);
+        console.log(`[Question Generation] Material Title: ${material.title}`);
+        console.log(
+          `[Question Generation] Parsed Content Length: ${contentLength} characters`
+        );
+        console.log(
+          `[Question Generation] Content Preview: ${material.parsedContent.substring(
+            0,
+            500
+          )}...`
+        );
+
+        if (contentLength < 100) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "Material content is too short (less than 100 characters). Please upload a proper PDF with content.",
+          });
+        }
+
         // Create question generation job
         const job = await prisma.question_Generation_Job.create({
           data: {
@@ -656,32 +679,6 @@ export const coordinatorRouter = createTRPCRouter({
               questionTypes: input.questionTypes,
             });
 
-            // Transform AI-generated questions to database format
-            const dbQuestions = generatedQuestions.map((q) => ({
-              courseId: material.courseId,
-              materialId: input.materialId,
-              unit: material.unit,
-              question: q.question_text,
-              answer: q.answer_text,
-              questionType: q.bloom_level as
-                | "REMEMBER"
-                | "ANALYZE"
-                | "UNDERSTAND"
-                | "APPLY"
-                | "EVALUATE"
-                | "CREATE",
-              difficultyLevel: q.difficulty_level,
-              bloomLevel: q.bloom_level,
-              generationType: q.question_type,
-              marks: q.marks,
-              materialName: q.material_name,
-            }));
-
-            // Insert questions into database
-            await prisma.question.createMany({
-              data: dbQuestions,
-            });
-
             // Update job status
             await prisma.question_Generation_Job.update({
               where: { id: job.id },
@@ -689,6 +686,26 @@ export const coordinatorRouter = createTRPCRouter({
                 status: "COMPLETED",
               },
             });
+
+            // Return generated questions for review (don't save to DB yet)
+            return {
+              success: true,
+              jobId: job.id,
+              totalQuestions,
+              questions: generatedQuestions.map((q) => ({
+                id: `temp_${Date.now()}_${Math.random()}`,
+                question: q.question_text,
+                answer: q.answer_text,
+                difficultyLevel: q.difficulty_level,
+                bloomLevel: q.bloom_level,
+                generationType: q.question_type,
+                marks: q.marks,
+              })),
+              courseId: material.courseId,
+              materialId: input.materialId,
+              unit: material.unit,
+              message: `Successfully generated ${totalQuestions} questions for review`,
+            };
           } catch (aiError) {
             // Update job with error status
             await prisma.question_Generation_Job.update({
@@ -712,8 +729,12 @@ export const coordinatorRouter = createTRPCRouter({
         return {
           success: true,
           jobId: job.id,
-          totalQuestions,
-          message: `Successfully generated ${totalQuestions} questions`,
+          totalQuestions: 0,
+          questions: [],
+          courseId: material.courseId,
+          materialId: input.materialId,
+          unit: material.unit,
+          message: "No questions generated (total count was 0)",
         };
       } catch (error) {
         if (error instanceof TRPCError) {
@@ -1010,6 +1031,129 @@ export const coordinatorRouter = createTRPCRouter({
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: "Failed to delete question",
+        });
+      }
+    }),
+
+  // Save reviewed questions to database
+  saveReviewedQuestions: coordinatorProcedure
+    .input(
+      z.object({
+        courseId: z.string(),
+        materialId: z.string(),
+        unit: z.number(),
+        questions: z.array(
+          z.object({
+            question: z.string(),
+            answer: z.string(),
+            difficultyLevel: z.enum(["EASY", "MEDIUM", "HARD"]),
+            bloomLevel: z.enum([
+              "REMEMBER",
+              "UNDERSTAND",
+              "APPLY",
+              "ANALYZE",
+              "EVALUATE",
+              "CREATE",
+            ]),
+            generationType: z.enum([
+              "DIRECT",
+              "INDIRECT",
+              "SCENARIO_BASED",
+              "PROBLEM_BASED",
+            ]),
+            marks: z.enum(["TWO", "EIGHT", "SIXTEEN"]),
+          })
+        ),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      try {
+        console.log(
+          "[DEBUG] saveReviewedQuestions input:",
+          JSON.stringify(input, null, 2)
+        );
+        console.log(
+          "[DEBUG] First question marks:",
+          input.questions[0]?.marks,
+          typeof input.questions[0]?.marks
+        );
+
+        const userId = ctx.session?.user?.id;
+        if (!userId) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "User not authenticated",
+          });
+        }
+
+        // Verify user is coordinator for this course
+        const course = await prisma.course.findFirst({
+          where: {
+            id: input.courseId,
+            courseCoordinatorId: userId,
+          },
+        });
+
+        if (!course) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Not authorized for this course",
+          });
+        }
+
+        // Get material name
+        const material = await prisma.course_Material.findUnique({
+          where: { id: input.materialId },
+          select: { title: true },
+        });
+
+        // Save all reviewed questions to database
+        const dbQuestions = input.questions.map((q) => ({
+          courseId: input.courseId,
+          materialId: input.materialId,
+          unit: input.unit,
+          question: q.question,
+          answer: q.answer,
+          questionType: q.bloomLevel,
+          difficultyLevel: q.difficultyLevel,
+          bloomLevel: q.bloomLevel,
+          generationType: q.generationType,
+          marks: q.marks,
+          materialName: material?.title || "Unknown Material",
+          status: "CREATED_BY_COURSE_COORDINATOR" as const,
+        }));
+
+        console.log(
+          "[DEBUG] About to save questions to DB:",
+          JSON.stringify(dbQuestions.slice(0, 1), null, 2)
+        );
+
+        await prisma.question.createMany({
+          data: dbQuestions,
+        });
+
+        console.log("[DEBUG] Questions saved successfully");
+
+        return {
+          success: true,
+          savedCount: input.questions.length,
+          message: `Successfully saved ${input.questions.length} questions to question bank`,
+        };
+      } catch (error) {
+        console.error("[ERROR] Failed to save questions:", error);
+        console.error("[ERROR] Error details:", {
+          message: error instanceof Error ? error.message : "Unknown error",
+          stack: error instanceof Error ? error.stack : undefined,
+        });
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            error instanceof Error
+              ? `Database error: ${error.message}`
+              : "Failed to save reviewed questions",
         });
       }
     }),

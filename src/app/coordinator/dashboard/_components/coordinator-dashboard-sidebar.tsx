@@ -57,11 +57,6 @@ const navigationItems = {
             url: "/coordinator/dashboard/course-management/generate-questions",
             icon: RiGeminiFill,
         },
-        {
-            title: "Question Bank",
-            url: "/coordinator/dashboard/course-management/view-question-bank",
-            icon: SiBookstack,
-        },
     ],
     questionPaper: [
         {

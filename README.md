@@ -1,327 +1,339 @@
-# 📄 BloomIQ – AI-Powered Question Paper Generator
+# BloomIQ - AI-Powered Question Paper Generator
 
-BloomIQ is an AI-driven question paper generation platform designed to streamline and secure the examination process using Bloom's Taxonomy. From uploading course material to confidential question paper delivery, BloomIQ empowers educators with automation and flexibility.
+> **Version 0.6.0** - Production-ready exam question generation platform
 
----
+BloomIQ is an AI-driven question paper generation platform that leverages Bloom's Taxonomy to create academically rigorous examination questions. The system features multi-level approval workflows, role-based access control, and local AI processing for complete data privacy.
 
-## 🚀 Features
+## Features
 
-- ✅ **Admin Panel**
-  - Add, edit, delete users.
-  - Assign or modify roles:
-    - `Admin`
-    - `Course Coordinator`
-    - `Module Coordinator`
-    - `Program Coordinator`
-    - `Controller of Examinations`
-  - Manage courses and syllabus.
+### Question Generation
+- **AI-Powered Analysis**: Deep material analysis using local Ollama models
+- **Bloom's Taxonomy Alignment**: Strict adherence to cognitive levels (Remember to Create)
+- **Multiple Question Types**: Direct, Problem-based, and Scenario-based questions
+- **Marks Distribution**: 2, 8, and 16 mark questions with appropriate depth
+- **Quality Assurance**: Non-blocking validation with detailed feedback
 
-- ✅ **Course Coordinator**
-  - Upload syllabus and unit-wise PDFs.
-  - Generate question banks based on Bloom’s Taxonomy.
-  - Set difficulty levels, control question variation, and avoid repetition.
+### Role-Based Workflows
+- **Admin**: User and course management
+- **Course Coordinator**: Upload materials, generate questions, review question bank
+- **Module Coordinator**: Review and approve questions
+- **Program Coordinator**: Final quality check
+- **Controller of Examinations**: Assemble and export question papers
 
-- ✅ **Module & Program Coordinators**
-  - Review generated questions.
-  - Accept or reject with reason.
+### Technical Highlights
+- **Local AI Processing**: Ollama integration (no external API calls)
+- **Intelligent Chunking**: Automatic handling of large PDF documents
+- **Robust Parsing**: Enhanced JSON sanitization and error handling
+- **Production Ready**: Comprehensive logging, validation, and error recovery
 
-- ✅ **Controller of Examinations**
-  - Review and approve final question papers.
-  - Generate confidential, printable question papers based on predefined patterns.
+## Tech Stack
 
-- ✅ **AI-Powered Generation**
-  - Uses Docker Model Runner with open-source LLMs (Gemma, Llama, Mistral, Phi).
-  - Plug-and-play model swapping for flexibility.
-  - Intelligent content chunking for large PDFs.
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 16 (App Router), Tailwind CSS, shadcn/ui |
+| Backend | tRPC v11, React Query |
+| Database | PostgreSQL, Prisma ORM |
+| Authentication | NextAuth v5 |
+| AI Engine | Ollama (Local LLM) |
+| AI Models | Gemma3:4b, Llama3, Mistral, Phi |
+| PDF Processing | pdf-parse, custom chunking algorithm |
+| Runtime | Bun |
 
-- ✅ **Notifications & Scheduling**
-  - Scheduled email notifications via Inngest or cron jobs.
+## Quick Start
 
-- ✅ **Secure Role-Based Access Control (RBAC)**
-  - Question papers accessible only to authorized roles.
+### Prerequisites
 
----
+- **Bun** runtime installed
+- **Docker** and Docker Compose
+- **Ollama** installed locally
+- Minimum 8GB RAM (16GB recommended)
 
-## 🛠️ Tech Stack
-
-| Layer                | Technologies                              |
-|----------------------|-------------------------------------------|
-| Frontend             | Next.js 16 (App Router) + Tailwind CSS    |
-| Backend API          | tRPC v11 + React Query                    |
-| Authentication       | NextAuth v5                               |
-| Database             | PostgreSQL + Prisma ORM                   |
-| AI Models            | Docker Compose Models (native AI support) |
-| Model Library        | Docker Hub AI models (Gemma, Llama, Mistral, Phi) |
-| Embeddings           | ChromaDB (planned)                        |
-| Background Jobs      | Background PDF parsing                    |
-| PDF Parsing          | pdf-parse + custom chunking algorithm     |
-| UI Components        | shadcn/ui + Radix UI                      |
-
----
-
-## ⚙️ System Workflow Diagram
-
-```plaintext
-                  ┌────────────┐
-                  │   Admin    │
-                  └────┬───────┘
-                       │
-     Manage Users, Courses, Assign Roles
-                       │
-           ┌───────────▼────────────┐
-           │  Faculty Users (Role-based)│
-           └────────────────────────┘
-   ┌────────────┬────────────┬─────────────┐
-   │ Course     │ Module     │ Program     │
-   │ Coordinator│ Coordinator│ Coordinator │
-   └─────┬──────┴──────┬─────┴────────────┘
-         │             │
-  Upload Syllabus/Unit │
-  PDFs                 │
-         │             │
-  Generate Questions   │
- (Docker Model Runner) │
-         │             │
-Review Questions <─────┘
- (Module + Program Coordinators)
-         │
- Questions Approved
-         ▼
-Controller of Examinations
-         │
-Generate Question Paper
-(Confidential - Only Controller Access)
-         │
-PDF Paper Generation + Print
-         ▼
- Examination Ready
-````
-
----
-
-## 📦 Project Setup
-
-> Using **Bun** for the project runtime.
-
-### 1️⃣ Clone the Repository
+### 1. Clone and Install
 
 ```bash
-git clone https://github.com/your-org/bloomiq.git
-cd bloomiq
-```
-
-### 2️⃣ Install Dependencies
-
-```bash
+git clone https://github.com/your-org/bloom-iq.git
+cd bloom-iq
 bun install
 ```
 
-### 3️⃣ Environment Variables
+### 2. Setup Ollama
 
-Create a `.env.local` file in the project root:
+**Install Ollama:**
+- Windows/macOS: Download from https://ollama.com/download
+- Linux: `curl -fsSL https://ollama.com/install.sh | sh`
 
-```dotenv
+**Pull the default model:**
+```bash
+ollama pull gemma3:4b
+```
+
+**Verify Ollama is running:**
+```bash
+curl http://localhost:11434
+# Should return: "Ollama is running"
+```
+
+See [OLLAMA_SETUP.md](./OLLAMA_SETUP.md) for detailed instructions.
+
+### 3. Configure Environment
+
+Create `.env.local`:
+
+```env
+# Database
 DATABASE_URL=postgresql://bloom_user:bloom_password@localhost:5432/bloom_iq
 DIRECT_URL=postgresql://bloom_user:bloom_password@localhost:5432/bloom_iq
-NEXTAUTH_SECRET=your-secret-key-here
+
+# Authentication
+NEXTAUTH_SECRET=your-super-secret-key-change-this-minimum-32-characters
 NEXTAUTH_URL=http://localhost:3000
+
+# Ollama AI
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=gemma3:4b
 ```
 
-### 4️⃣ Start Docker Services
-
-**Requires Docker Compose v2.38+** for native AI model support.
+### 4. Start Database
 
 ```bash
-# Start PostgreSQL + AI Model
-docker-compose up -d
-
-# Verify services are running
-docker-compose ps
+docker compose up -d
 ```
 
-Docker Compose will automatically:
-- Pull and run the AI model (`ai/gemma2:2b`)
-- Set up PostgreSQL database
-- Inject AI model endpoints into the app
-
-### 5️⃣ Database Setup
+### 5. Setup Database
 
 ```bash
 bunx prisma generate
-bunx prisma migrate deploy
-bunx prisma db seed  # Optional: seed with test data
+bunx prisma db push
+bunx prisma db seed  # Optional: adds test data
 ```
 
-### 6️⃣ Running the Development Server
+### 6. Run Development Server
 
 ```bash
 bun run dev
 ```
 
-App will be available at [http://localhost:3000](http://localhost:3000)
+Access the application at http://localhost:3000
 
----
+## AI Model Configuration
 
-## 🤖 AI Model Configuration
+BloomIQ uses **Ollama** for local AI model execution. No external API calls are made.
 
-BloomIQ uses Docker Compose's native AI model support. Models are defined in `docker-compose.yaml`:
+### Available Models
 
-```yaml
-models:
-  ai_model:
-    model: ai/gemma2:2b      # Model from hub.docker.com/u/ai
-    context_size: 8192       # Token context window
-    runtime_flags:           # Model inference parameters
-      - "--temp"
-      - "0.7"
-      - "--top-p"
-      - "0.9"
-```
+| Model | Size | Context | Best For |
+|-------|------|---------|----------|
+| `gemma3:4b` | 4B | 8K | Default, balanced |
+| `llama3.2:3b` | 3B | 128K | Long documents |
+| `llama3.1:8b` | 8B | 128K | High quality (needs 12GB RAM) |
+| `mistral:7b` | 7B | 32K | Industry standard |
+| `qwen2.5:7b` | 7B | 32K | Excellent performance |
 
-**Available Models:**
-- `ai/gemma2:2b` - Fast, efficient (Recommended)
-- `ai/gemma2:9b` - Higher quality
-- `ai/llama3.2:3b` - Long context (128K tokens)
-- `ai/mistral:7b` - Industry standard
-- `ai/phi3.5:latest` - Microsoft's model
-
-**Switch Models:** Update `docker-compose.yaml` and run `docker-compose up -d`
-
-See [DOCKER_MODEL_RUNNER_SETUP.md](./DOCKER_MODEL_RUNNER_SETUP.md) for details.
-
----
-
-## 📅 Tentative Development Plan
-
-| Phase                 | Tasks                                                    |
-| --------------------- | -------------------------------------------------------- |
-| Phase 1️⃣ : Setup     | Project scaffolding, Supabase Auth, Prisma setup         |
-| Phase 2️⃣ : Admin     | CRUD for Users, Roles, Courses (Admin Panel)             |
-| Phase 3️⃣ : Uploads   | PDF Upload (Course Coordinator), LangChain parsing       |
-|| Phase 4️⃣ : AI Gen    | Question generation via Gemini                            |
-| Phase 5️⃣ : Review    | Workflow for question approvals                          |
-| Phase 6️⃣ : Exam Ctrl | Controller-exclusive paper generation + PDF export       |
-| Phase 7️⃣ : Jobs      | Inngest-based background processing, scheduled emails    |
-| Phase 8️⃣ : Security  | RBAC middleware, role-guarded UI                         |
-| Phase 9️⃣ : Polish    | UI, error handling, performance optimization             |
-
----
-
-## 📧 Scheduled Email Notifications
-
-* Use Inngest for background task orchestration.
-* Schedule notifications for:
-
-  * Reminders to coordinators.
-  * Notification of question approval/rejection.
-  * Exam schedule updates.
-
----
-
-## 🔒 Security Notes
-
-* RBAC enforced across all APIs and UI routes.
-* Question papers visible only to Controller of Examinations.
-* NextAuth v5 for session management with secure cookies.
-* Background jobs do not expose sensitive data.
-* Passwords hashed with bcrypt.
-
----
-
-## 🐳 Docker Deployment
-
-### Quick Start
+### Switch Models
 
 ```bash
-# Start all services
-docker-compose up -d
+# Pull a different model
+ollama pull llama3.1:8b
 
-# Run migrations
-docker-compose exec bloom-iq-app bunx prisma migrate deploy
+# Update .env.local
+OLLAMA_MODEL=llama3.1:8b
 
-# View logs
-docker-compose logs -f
+# Restart the application
 ```
 
-### Architecture
+See [OLLAMA_SETUP.md](./OLLAMA_SETUP.md) for troubleshooting and advanced configuration.
 
-The Docker setup includes:
-- **PostgreSQL**: Database server
-- **Next.js App**: Standalone deployment with Bun runtime
-- **AI Model**: Native Docker Compose AI models (auto-configured)
+## Project Structure
 
-Environment variables `AI_MODEL_URL` and `AI_MODEL_NAME` are automatically injected by Docker Compose's `models` feature.
+```
+bloom-iq/
+├── src/
+│   ├── app/                    # Next.js App Router pages
+│   │   ├── (auth)/            # Authentication pages
+│   │   ├── admin/             # Admin dashboard
+│   │   ├── coordinator/       # Coordinator dashboards
+│   │   └── api/               # API routes
+│   ├── components/            # React components
+│   ├── services/              # Business logic layer
+│   │   └── ai/               # AI service (Ollama integration)
+│   ├── trpc/                  # tRPC routers
+│   ├── lib/                   # Utility functions
+│   └── validators/            # Zod schemas
+├── prisma/
+│   ├── schema.prisma          # Database schema
+│   └── migrations/            # Database migrations
+├── docker-compose.yaml        # PostgreSQL service
+└── OLLAMA_SETUP.md           # AI setup guide
+```
 
-### Deployment Guides
+## Development Workflow
 
-- **Detailed Setup**: [DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md)
-- **AI Model Configuration**: [DOCKER_MODEL_RUNNER_SETUP.md](./DOCKER_MODEL_RUNNER_SETUP.md)
+### 1. Admin Setup
+- Create users with appropriate roles
+- Add courses and configure syllabi
 
----
+### 2. Course Coordinator
+- Upload unit-wise PDF materials
+- Generate questions using AI
+- Review generated questions
+- Submit for approval
 
-## 🧪 Testing
+### 3. Module/Program Coordinator
+- Review submitted questions
+- Approve or reject with feedback
+- Questions return to coordinator if rejected
 
-### Run Tests
+### 4. Controller of Examinations
+- Access approved question bank
+- Assemble question papers
+- Export final papers for printing
+
+## Question Generation System
+
+### Bloom's Taxonomy Levels
+
+| Level | Cognitive Process | Difficulty | Marks |
+|-------|------------------|------------|-------|
+| REMEMBER | Recall facts, definitions | EASY | 2 |
+| UNDERSTAND | Explain concepts | EASY | 2 |
+| APPLY | Apply theory to examples | MEDIUM | 8 |
+| ANALYZE | Compare, contrast, examine | MEDIUM | 8 |
+| EVALUATE | Justify, critique, assess | HARD | 16 |
+| CREATE | Design, formulate, produce | HARD | 16 |
+
+### Question Types
+
+1. **DIRECT**: Definition-based, explanatory, list/identify
+2. **PROBLEM_BASED**: Apply theory, solve problems, step-by-step
+3. **SCENARIO_BASED**: Real-world situations, multi-step reasoning
+
+### Answer Standards
+
+- **2 Marks**: 50-100 words, concise definition/explanation
+- **8 Marks**: 400-600 words, comprehensive explanation
+- **16 Marks**: 1000-1500 words, exhaustive coverage with examples
+
+## Database Schema
+
+Key models:
+- **User**: Authentication and role management
+- **Course**: Course information and configuration
+- **CourseMaterial**: Uploaded PDF content
+- **Question**: Generated questions with metadata
+- **QuestionPaper**: Assembled exam papers
+
+See `prisma/schema.prisma` for complete schema.
+
+## Scripts
 
 ```bash
-# Unit tests
-bun test
+# Development
+bun run dev              # Start dev server
+bun run build            # Build for production
+bun run start            # Start production server
 
-# Type checking
-bun run build
+# Database
+bunx prisma generate     # Generate Prisma client
+bunx prisma studio       # Open database GUI
+bunx prisma db push      # Sync schema to database
+bunx prisma db seed      # Seed test data
+
+# Code Quality
+bun run lint             # Run ESLint
+bun run type-check       # TypeScript validation
 ```
 
-### Manual Testing Workflow
+## Security Features
 
-1. **Admin**: Create users with different roles
-2. **Course Coordinator**: Upload PDF, generate questions
-3. **Module Coordinator**: Review and approve/reject questions
-4. **Program Coordinator**: Final review
-5. **Controller of Examinations**: Assemble question paper
+- **NextAuth v5**: Secure session management
+- **Role-Based Access Control**: Enforced at API and UI levels
+- **Password Hashing**: bcrypt with salt rounds
+- **SQL Injection Protection**: Prisma parameterized queries
+- **Local AI Processing**: No data sent to external services
 
----
+## Deployment
 
-## 📋 Feature Checklist
+### Production Checklist
 
-### Completed ✅
+- [ ] Set strong `NEXTAUTH_SECRET` (min 32 characters)
+- [ ] Change default PostgreSQL password
+- [ ] Enable HTTPS/TLS
+- [ ] Set up database backups
+- [ ] Configure monitoring and logging
+- [ ] Review environment variables
+- [ ] Test all user workflows
 
-- [x] Authentication & Authorization (NextAuth v5)
-- [x] Admin dashboard (user/course CRUD)
-- [x] Service layer architecture (clean separation)
-- [x] Question approval workflow (CC → MC → PC → COE)
-- [x] Question review UI with feedback system
-- [x] Docker Model Runner integration (native Compose models)
-- [x] PDF parsing and content chunking
-- [x] AI question generation
-- [x] Role-based access control
+### Environment Variables (Production)
 
-### In Progress 🚧
+```env
+NODE_ENV=production
+DATABASE_URL=postgresql://secure_user:strong_pass@postgres:5432/bloom_iq
+NEXTAUTH_SECRET=production-secret-minimum-32-characters-long
+NEXTAUTH_URL=https://your-domain.com
+OLLAMA_BASE_URL=http://ollama-service:11434
+OLLAMA_MODEL=gemma3:4b
+```
 
-- [ ] Question editing interface
-- [ ] COE dashboard (paper assembly)
-- [ ] ChromaDB integration (semantic search)
+## Documentation
 
-### Planned 📅
+- [CHANGELOG.md](./CHANGELOG.md) - Version history
+- [OLLAMA_SETUP.md](./OLLAMA_SETUP.md) - AI setup and troubleshooting
+- [RELEASE_NOTES_0.6.0.md](./RELEASE_NOTES_0.6.0.md) - Latest release details
 
-- [ ] Background job queue (Inngest)
-- [ ] Email notifications
-- [ ] Question paper PDF export
-- [ ] Analytics dashboard
-- [ ] Bulk operations
+## Troubleshooting
 
----
+### Ollama Connection Issues
 
-## 🤝 Contributing
+```bash
+# Check if Ollama is running
+curl http://localhost:11434
+
+# Restart Ollama service
+# Windows: Restart from system tray
+# macOS: brew services restart ollama
+# Linux: systemctl restart ollama
+```
+
+### Database Connection Issues
+
+```bash
+# Check if PostgreSQL is running
+docker compose ps
+
+# Restart PostgreSQL
+docker compose restart postgres
+
+# Check logs
+docker compose logs postgres
+```
+
+### Question Generation Issues
+
+- Ensure Ollama model is downloaded: `ollama list`
+- Check model has enough context: Default 8K tokens
+- Verify PDF content is readable (not scanned images)
+- Check application logs for detailed error messages
+
+## Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Commit changes: `git commit -m 'Add amazing feature'`
+4. Push to branch: `git push origin feature/amazing-feature`
 5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License.
+
+## Support
+
+For issues and questions:
+- **GitHub Issues**: Create an issue in the repository
+- **Documentation**: Check [OLLAMA_SETUP.md](./OLLAMA_SETUP.md) for AI-related issues
+- **Ollama Docs**: https://ollama.com/docs
 
 ---
 
-## 📄 License
-
-This project is licensed under the MIT License.
+**Built with academic rigor and production quality.**
 

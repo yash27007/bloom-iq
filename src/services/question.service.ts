@@ -4,7 +4,7 @@
  * Handles all question-related business logic including:
  * - Question generation from parsed content
  * - Question CRUD operations
- * - Approval workflow (CC → MC → PC → COE)
+ * - Approval workflow (CC -> MC -> PC -> COE)
  * - Rejection feedback management
  * - Question status transitions
  */

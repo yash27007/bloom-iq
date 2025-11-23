@@ -19,43 +19,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # bloom-iq-app:
-  #   build: .
-  #   container_name: bloom-iq-app
-  #   restart: unless-stopped
-  #   ports:
-  #     - "3000:3000"
-  #   environment:
-  #     - DATABASE_URL=postgresql://bloom_user:bloom_password@postgres:5432/bloom_iq
-  #     - DOCKER_MODEL_RUNNER_URL=${AI_MODEL_URL}
-  #     - DEFAULT_AI_MODEL=${AI_MODEL_NAME}
-  #   models:
-  #     ai_model:
-  #       endpoint_var: AI_MODEL_URL
-  #       model_var: AI_MODEL_NAME
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-
-models:
-  ai_model:
-    model: ai/gemma3:4b
-    context_size: 131072
-    runtime_flags:
-      - "--temp"
-      - "0.7"
-      - "--top-p"
-      - "0.9"
-      - "--threads"
-      - "8"
-    # Alternative models you can use:
-    # model: ai/gemma2:9b       - Google Gemma 2 9B (high quality, requires more RAM)
-    # model: ai/llama3.1:8b     - Meta Llama 3.1 8B (balanced performance)
-    # model: ai/phi3:3.8b       - Microsoft Phi-3 3.8B (efficient, fast)
-    # model: ai/mistral:7b      - Mistral 7B (excellent instruction following)
-      - "--ctx-size"
-      - "131072"
-
 volumes:
   postgres_data:
     driver: local
