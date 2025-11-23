@@ -8,7 +8,7 @@ export function Footer() {
             <div className="container mx-auto px-6 py-6">
                 <div className="flex flex-col md:flex-row items-center justify-between gap-4">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <span>© {currentYear} BloomIQ. All rights reserved.</span>
+                        <span>&copy; {currentYear} BloomIQ. All rights reserved.</span>
                     </div>
 
                     <div className="flex items-center gap-6 text-sm text-muted-foreground">
@@ -28,7 +28,7 @@ export function Footer() {
                             AI-Powered Question Paper Generation System using Bloom&apos;s Taxonomy
                         </div>
                         <div className="flex items-center gap-4">
-                            <span>Version 1.0.0</span>
+                            <span>Version 0.1.0</span>
                             <span>•</span>
                             <span>Built with Next.js & TypeScript</span>
                         </div>

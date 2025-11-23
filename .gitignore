@@ -43,5 +43,13 @@ next-env.d.ts
 
 /src/generated/prisma
 
+# Uploaded files (PDFs, etc.)
+/src/uploads/
+uploads/
+temp/
+
+# Bloom AI history/cache
+bloom.json
+
 #Google cloud credentials
 credentials.json

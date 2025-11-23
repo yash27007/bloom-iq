@@ -159,6 +159,11 @@ const eligibleCoordinatorInput = z.object({
   role: z.enum(roleArray).optional(),
 });
 
+const eligibleCoordinatorsForEditInput = z.object({
+  role: z.enum(roleArray).optional(),
+  currentCourseId: z.string(), // The course being edited
+});
+
 // Bulk
 const bulkIdsSchema = z.object({
   ids: z.array(z.string()).min(1),
@@ -959,6 +964,7 @@ export const adminRouter = createTRPCRouter({
    *
    * - Only returns active users
    * - Optional `role` filter (e.g., only COURSE_COORDINATOR)
+   * - Excludes users already assigned to courses (respects one-to-one constraint)
    * - Sorted by firstName, lastName ASC for nice dropdowns
    */
   getEligibleCoordinators: adminProcedure
@@ -967,6 +973,103 @@ export const adminRouter = createTRPCRouter({
       const where: Prisma.UserWhereInput = {
         isActive: true, // Only active users can be coordinators
         ...(input.role ? { role: input.role } : {}),
+        // Exclude users who are already assigned as coordinators in any role
+        AND: [
+          {
+            courseCoordinatorCourses: {
+              none: {}, // User is not a course coordinator for any course
+            },
+          },
+          {
+            moduleCoordinatorCourses: {
+              none: {}, // User is not a module coordinator for any course
+            },
+          },
+          {
+            programCoordinatorCourses: {
+              none: {}, // User is not a program coordinator for any course
+            },
+          },
+        ],
+      };
+
+      const coordinators = await prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          facultyId: true,
+          role: true,
+          isActive: true,
+        },
+        orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+      });
+
+      return ok({ data: coordinators });
+    }),
+
+  /**
+   * Fetch users eligible to be coordinators for editing a specific course.
+   *
+   * - Only returns active users
+   * - Optional `role` filter (e.g., only COURSE_COORDINATOR)
+   * - Excludes users already assigned to OTHER courses (not the current one)
+   * - Includes current coordinators of the course being edited
+   * - Sorted by firstName, lastName ASC for nice dropdowns
+   */
+  getEligibleCoordinatorsForEdit: adminProcedure
+    .input(eligibleCoordinatorsForEditInput)
+    .query(async ({ input }) => {
+      const { currentCourseId, role } = input;
+
+      const where: Prisma.UserWhereInput = {
+        isActive: true, // Only active users can be coordinators
+        ...(role ? { role } : {}),
+        // Include unassigned users OR users currently assigned to this specific course
+        OR: [
+          // Unassigned users (not coordinators for any course)
+          {
+            AND: [
+              {
+                courseCoordinatorCourses: {
+                  none: {}, // User is not a course coordinator for any course
+                },
+              },
+              {
+                moduleCoordinatorCourses: {
+                  none: {}, // User is not a module coordinator for any course
+                },
+              },
+              {
+                programCoordinatorCourses: {
+                  none: {}, // User is not a program coordinator for any course
+                },
+              },
+            ],
+          },
+          // Current coordinators of this course
+          {
+            OR: [
+              {
+                courseCoordinatorCourses: {
+                  some: { id: currentCourseId },
+                },
+              },
+              {
+                moduleCoordinatorCourses: {
+                  some: { id: currentCourseId },
+                },
+              },
+              {
+                programCoordinatorCourses: {
+                  some: { id: currentCourseId },
+                },
+              },
+            ],
+          },
+        ],
       };
 
       const coordinators = await prisma.user.findMany({

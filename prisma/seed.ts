@@ -3,7 +3,7 @@
    or add to package.json -> "prisma": { "seed": "ts-node --transpile-only prisma/seed.ts" }
 */
 
-import { PrismaClient, Designation, Role } from "@/generated/prisma";
+import { PrismaClient, Designation, Role } from "../src/generated/prisma";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
@@ -410,6 +410,53 @@ async function main() {
 
   console.log(`✅ Created ${courses.length} courses.`);
 
+  // Create sample course materials
+  console.log("📄 Creating sample course materials...");
+  let materialsCreated = 0;
+
+  for (const course of courses) {
+    // Create a syllabus for each course
+    try {
+      await prisma.course_Material.create({
+        data: {
+          courseId: course.id,
+          title: `${course.name} Syllabus`,
+          filePath: `syllabus-${course.course_code.toLowerCase()}.pdf`,
+          materialType: "SYLLABUS",
+          unit: 0,
+          uploadedById: course.courseCoordinatorId,
+        },
+      });
+      materialsCreated++;
+    } catch (_error) {
+      console.warn(`   ⚠️ Failed to create syllabus for ${course.course_code}`);
+    }
+
+    // Create 2-3 unit materials for each course
+    const unitCount = Math.floor(Math.random() * 3) + 2; // 2-4 units
+    for (let unit = 1; unit <= unitCount; unit++) {
+      try {
+        await prisma.course_Material.create({
+          data: {
+            courseId: course.id,
+            title: `${course.name} - Unit ${unit} Material`,
+            filePath: `unit-${unit}-${course.course_code.toLowerCase()}.pdf`,
+            materialType: "UNIT_PDF",
+            unit: unit,
+            uploadedById: course.courseCoordinatorId,
+          },
+        });
+        materialsCreated++;
+      } catch (_error) {
+        console.warn(
+          `   ⚠️ Failed to create unit ${unit} material for ${course.course_code}`
+        );
+      }
+    }
+  }
+
+  console.log(`✅ Created ${materialsCreated} course materials.`);
+
   // sample query to show the relation is visible from User
   const sampleCoordinator =
     courses.length > 0 ? courses[0].courseCoordinatorId : users[0]?.id;
@@ -463,6 +510,7 @@ async function main() {
     `  Active program coordinators: ${activeProgramCoordinators.length}`
   );
   console.log(`  Total courses created: ${courses.length}`);
+  console.log(`  Total course materials created: ${materialsCreated}`);
   console.log("\n  Default password for seeded accounts: Password@123");
   console.log("=".repeat(40) + "\n");
 

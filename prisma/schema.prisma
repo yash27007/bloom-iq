@@ -47,6 +47,7 @@ model Course {
   programCoordinator     User                      @relation("ProgramCoordinator", fields: [programCoordinatorId], references: [id], onDelete: Cascade)
   questionGenerationJobs Question_Generation_Job[] @relation("CourseOnQuestionGenerationJob")
   questions              Question[]
+  patterns               QuestionPaperPattern[]
 
   @@index([course_code, id])
   @@map("courses")
@@ -61,31 +62,51 @@ model Course_Material {
   unit                    Int                       @default(0)
   version                 Int                       @default(1)
   uploadedById            String
+  parsedContent           String? // Markdown content parsed from PDF
+  parsingStatus           Parsing_Status            @default(PENDING) // Track parsing progress
+  parsingError            String? // Store any parsing errors
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
   course                  Course                    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   uploadedBy              User                      @relation(fields: [uploadedById], references: [id])
   Question_Generation_Job Question_Generation_Job[]
+  questions               Question[]
 
   @@index([id, courseId])
   @@map("course_material")
 }
 
 model Question {
-  id           String              @id @default(uuid())
-  courseId     String
-  unit         Int                 @default(0)
-  question     String
-  answer       String
-  questionType Question_Type
-  marks        Marks
-  status       QuestionStatus      @default(CREATED_BY_COURSE_COORDINATOR)
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  feedback     Question_Feedback[] @relation("QuestionOnFeedback")
-  course       Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  id              String              @id @default(uuid())
+  courseId        String
+  materialId      String? // Reference to source material
+  unit            Int                 @default(0)
+  question        String
+  answer          String
+  questionType    Question_Type
+  difficultyLevel DifficultyLevel     @default(MEDIUM)
+  bloomLevel      BloomLevel          @default(UNDERSTAND)
+  generationType  GenerationType      @default(DIRECT)
+  marks           Marks
+  status          QuestionStatus      @default(CREATED_BY_COURSE_COORDINATOR)
+  // Review flags
+  reviewedByCc    Boolean             @default(false)
+  reviewedByMc    Boolean             @default(false)
+  reviewedByPc    Boolean             @default(false)
+  ccApprovedAt    DateTime?
+  mcApprovedAt    DateTime?
+  pcApprovedAt    DateTime?
+  // Metadata
+  materialName    String?
+  isFinalized     Boolean             @default(false)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  feedback        Question_Feedback[] @relation("QuestionOnFeedback")
+  course          Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseMaterial  Course_Material?    @relation(fields: [materialId], references: [id])
 
-  @@index([courseId, id])
+  @@index([courseId, id, status])
+  @@index([materialId])
   @@map("questions")
 }
 
@@ -139,6 +160,15 @@ enum Material_Type {
   UNIT_PDF
 }
 
+/// *
+///  * PDF parsing status for async processing
+enum Parsing_Status {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 enum Question_Type {
   REMEMBER
   ANALYZE
@@ -174,4 +204,151 @@ enum QuestionStatus {
   UNDER_REVIEW_FROM_MODULE_COORDINATOR
   ACCEPTED
   REJECTED
+}
+
+/// *
+///  * Difficulty levels for questions
+enum DifficultyLevel {
+  EASY
+  MEDIUM
+  HARD
+}
+
+/// *
+///  * Bloom's taxonomy levels for learning objectives
+enum BloomLevel {
+  REMEMBER
+  UNDERSTAND
+  APPLY
+  ANALYZE
+  EVALUATE
+  CREATE
+}
+
+/// *
+///  * Question generation types
+enum GenerationType {
+  DIRECT
+  INDIRECT
+  SCENARIO_BASED
+  PROBLEM_BASED
+}
+
+/// *
+///  * Pattern approval status
+enum PatternStatus {
+  DRAFT
+  PENDING_MC_APPROVAL
+  PENDING_PC_APPROVAL
+  PENDING_COE_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+/// *
+///  * Question paper status
+enum PaperStatus {
+  DRAFT
+  GENERATED
+  FINALIZED
+}
+
+/// *
+///  * Exam types
+enum ExamType {
+  SESSIONAL_1
+  SESSIONAL_2
+  END_SEMESTER
+}
+
+/// *
+///  * Semester type
+enum SemesterType {
+  ODD
+  EVEN
+}
+
+/// *
+///  * Question Paper Pattern - Defines the structure of the exam paper
+model QuestionPaperPattern {
+  id           String       @id @default(uuid())
+  courseId     String
+  course       Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  patternName  String
+  academicYear String
+  semesterType SemesterType // ODD or EVEN
+  examType     ExamType // SESSIONAL_1, SESSIONAL_2, END_SEMESTER
+
+  totalMarks Int // 50 for Sessional, 100 for End Sem
+  duration   Int // minutes
+
+  // Part A and Part B structures stored as JSON
+  // This allows flexible question slot definitions
+  partAStructure Json // Array of question slots
+  partBStructure Json // Array of question slots with OR options
+
+  instructions String?
+
+  // Approval workflow
+  status        PatternStatus @default(DRAFT)
+  createdByRole String
+  createdById   String
+
+  mcApproved     Boolean   @default(false)
+  mcApprovedAt   DateTime?
+  mcApprovedById String?
+  mcRemarks      String?
+
+  pcApproved     Boolean   @default(false)
+  pcApprovedAt   DateTime?
+  pcApprovedById String?
+  pcRemarks      String?
+
+  coeApproved     Boolean   @default(false)
+  coeApprovedAt   DateTime?
+  coeApprovedById String?
+  coeRemarks      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  generatedPapers QuestionPaper[]
+
+  @@index([courseId])
+  @@map("question_paper_patterns")
+}
+
+/// *
+///  * Generated Question Paper - Final exam paper
+model QuestionPaper {
+  id         String @id @default(uuid())
+  patternId  String
+  courseId   String
+  paperCode  String @unique // e.g., CS301-2025-SEM1-SET-A
+  setVariant String // e.g., "SET-A", "SET-B"
+
+  // Selected questions (JSON array of question IDs)
+  partA_questionIds String[] // Question IDs for Part A
+  partB_questionIds String[] // Question IDs for Part B
+
+  // Generated content
+  paperContent     String? // Final paper HTML/JSON
+  answerKeyContent String? // Answer key HTML/JSON
+
+  status        PaperStatus @default(DRAFT)
+  generatedAt   DateTime?
+  generatedById String
+
+  // Security - only COE can finalize
+  isFinalized Boolean   @default(false)
+  finalizedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pattern QuestionPaperPattern @relation(fields: [patternId], references: [id])
+
+  @@index([patternId])
+  @@index([courseId])
+  @@map("question_papers")
 }

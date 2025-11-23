@@ -20,10 +20,10 @@ import {
     ClientCourse
 } from "./course-management-components";
 import { useState } from "react";
-import { useTRPC } from "@/trpc/client";
+import { trpc } from "@/trpc/client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { useMutation } from "@tanstack/react-query";
+// useMutation is now handled by tRPC
 
 interface Coordinator {
     id: string;
@@ -51,10 +51,9 @@ export function CoursesManagementClient({ initialData, coordinators }: CoursesMa
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
     const router = useRouter();
-    const trpc = useTRPC();
-    const addCourseMutation = useMutation(trpc.admin.addCourse.mutationOptions());
-    const updateCourseMutation = useMutation(trpc.admin.updateCourse.mutationOptions());
-    const deleteCourseMutation = useMutation(trpc.admin.deleteCourse.mutationOptions());
+    const addCourseMutation = trpc.admin.addCourse.useMutation();
+    const updateCourseMutation = trpc.admin.updateCourse.useMutation();
+    const deleteCourseMutation = trpc.admin.deleteCourse.useMutation();
 
     const handleAddCourse = async (data: {
         courseCode: string;
