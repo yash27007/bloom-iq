@@ -43,5 +43,9 @@ next-env.d.ts
 
 /src/generated/prisma
 
+# Uploaded files (PDFs, etc.)
+/src/uploads/
+uploads/
+
 #Google cloud credentials
 credentials.json
