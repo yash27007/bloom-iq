@@ -46,6 +46,10 @@ next-env.d.ts
 # Uploaded files (PDFs, etc.)
 /src/uploads/
 uploads/
+temp/
+
+# Bloom AI history/cache
+bloom.json
 
 #Google cloud credentials
 credentials.json
