@@ -116,20 +116,18 @@ You MUST distribute marks as follows:
 8-mark questions -> MEDIUM difficulty, APPLY/ANALYZE
 16-mark questions -> HARD difficulty, EVALUATE/CREATE
 
-EVERY question MUST show marks in the question text.
-Format: "Q1. Define protocol. (2 Marks)"
-
 == 6. ANSWER GENERATION RULES - EXAM QUALITY ==
 
 For EACH question, you MUST include a detailed, exam-ready answer that:
 
 - Is CLEAR and TECHNICALLY ACCURATE
 - Is based STRICTLY on the material provided
-- Uses STRUCTURED formatting:
-  * Bullet points for lists
-  * Numbered steps for procedures
-  * Tables for comparisons
-  * Paragraphs with clear topic sentences
+- Uses PLAIN TEXT formatting (NO markdown syntax):
+  * Use plain text with line breaks for structure
+  * Use numbered lists as "1. First item" (plain text, not markdown)
+  * Use bullet points as "- Item" (plain text, not markdown)
+  * Use paragraphs with clear topic sentences
+  * DO NOT use **bold**, *italic*, # headers, or any markdown syntax
 - Includes EXAMPLES from the material when needed
 - Includes DIAGRAMS descriptions when relevant
 - Matches the DEPTH required by marks:
@@ -138,6 +136,7 @@ For EACH question, you MUST include a detailed, exam-ready answer that:
   * 16 marks -> 1000-1500 words, exhaustive coverage
 
 You must NEVER produce:
+- Markdown formatting (**bold**, *italic*, # headers, etc.) - use plain text only
 - Vague or generic answers
 - Placeholder text like "[Answer here]"
 - Phrases like "as mentioned in the material" without actual content

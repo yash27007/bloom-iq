@@ -65,6 +65,17 @@ export async function proxy(request: NextRequest) {
   // Role-based route protection
   const userRole = session.user.role as UserRole;
 
+  // Redirect COE users from /coe/dashboard to /coordinator/dashboard
+  if (pathname.startsWith("/coe/dashboard")) {
+    if (userRole === "CONTROLLER_OF_EXAMINATION") {
+      // Replace /coe/dashboard with /coordinator/dashboard
+      const newPath = pathname.replace("/coe/dashboard", "/coordinator/dashboard");
+      return NextResponse.redirect(new URL(newPath, request.url));
+    } else {
+      return NextResponse.redirect(new URL("/unauthorized", request.url));
+    }
+  }
+
   // Admin routes protection
   if (pathname.startsWith("/admin")) {
     if (!canAccessAdminRoutes(userRole)) {

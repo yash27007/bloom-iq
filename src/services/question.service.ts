@@ -241,15 +241,35 @@ export class QuestionService {
 
   /**
    * Update question
+   * If question was rejected, reset status and approval flags for resubmission
    */
   static async updateQuestion(
     input: UpdateQuestionInput
   ): Promise<ServiceResult<QuestionResponse>> {
     const { id, ...updates } = input;
 
+    // Check if question is currently rejected
+    const existingQuestion = await prisma.question.findUnique({
+      where: { id },
+      select: { status: true },
+    });
+
+    // If question was rejected and is being updated, reset it for resubmission
+    const updateData: any = { ...updates };
+    if (existingQuestion?.status === "REJECTED") {
+      updateData.status = "CREATED_BY_COURSE_COORDINATOR";
+      updateData.reviewedByCc = false;
+      updateData.reviewedByMc = false;
+      updateData.reviewedByPc = false;
+      updateData.ccApprovedAt = null;
+      updateData.mcApprovedAt = null;
+      updateData.pcApprovedAt = null;
+      updateData.isFinalized = false;
+    }
+
     const question = await prisma.question.update({
       where: { id },
-      data: updates,
+      data: updateData,
       select: {
         id: true,
         courseId: true,
@@ -278,7 +298,9 @@ export class QuestionService {
 
     return {
       data: question as QuestionResponse,
-      message: "Question updated successfully.",
+      message: existingQuestion?.status === "REJECTED"
+        ? "Question updated and ready for resubmission."
+        : "Question updated successfully.",
     };
   }
 
