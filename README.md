@@ -90,7 +90,7 @@ NEXTAUTH_URL=http://localhost:3000
 
 # Ollama AI
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=gemma3:4b
+OLLAMA_MODEL=mistral:7b
 ```
 
 ### 4. Start Database
@@ -123,23 +123,36 @@ BloomIQ uses **Ollama** for local AI model execution. No external API calls are 
 
 | Model | Size | Context | Best For |
 |-------|------|---------|----------|
-| `gemma3:4b` | 4B | 8K | Default, balanced |
-| `llama3.2:3b` | 3B | 128K | Long documents |
-| `llama3.1:8b` | 8B | 128K | High quality (needs 12GB RAM) |
-| `mistral:7b` | 7B | 32K | Industry standard |
-| `qwen2.5:7b` | 7B | 32K | Excellent performance |
+| `gemma3:4b` | 4B | 8K | Fast, lightweight (may have quality issues, use RAG for better results) |
+| `mistral:7b` | 7B | 32K | **Recommended** - Fast, efficient, excellent instruction following, less heat |
+| `qwen2.5:7b` | 7B | 32K | Fast, excellent quality, balanced |
+| `llama3.1:8b` | 8B | 128K | High quality, longer answers (needs 12GB RAM, slower) |
+| `deepseek-r1:8b` | 8B | 64K | Excellent reasoning, good quality |
+| `deepseek-r1:14b` | 14B | 64K | Best quality but slow, needs 16GB+ RAM |
+| `llama3.2:3b` | 3B | 128K | Very fast but lower quality |
 
 ### Switch Models
 
 ```bash
-# Pull a different model
+# Pull Mistral 7B (Recommended - Fast, efficient, less heat)
+ollama pull mistral:7b
+
+# Or pull other models
 ollama pull llama3.1:8b
+ollama pull qwen2.5:7b
+ollama pull deepseek-r1:8b
 
 # Update .env.local
-OLLAMA_MODEL=llama3.1:8b
+OLLAMA_MODEL=mistral:7b
 
 # Restart the application
 ```
+
+**Recommended Model**: `mistral:7b` provides excellent instruction following, fast generation, and efficient resource usage, making it ideal for academic question generation without overheating your system. Best balance of speed, quality, and efficiency.
+
+**For Longer Answers (if you have more RAM)**: `llama3.1:8b` - generates longer, more detailed answers but requires ~12GB RAM and runs slower.
+
+**For Smaller Models (gemma3:4b)**: The system uses RAG (Retrieval-Augmented Generation) with chunking and embeddings to improve quality. Materials are automatically chunked and embedded, allowing smaller models to generate better questions by using relevant context chunks.
 
 See [OLLAMA_SETUP.md](./OLLAMA_SETUP.md) for troubleshooting and advanced configuration.
 
@@ -271,7 +284,7 @@ DATABASE_URL=postgresql://secure_user:strong_pass@postgres:5432/bloom_iq
 NEXTAUTH_SECRET=production-secret-minimum-32-characters-long
 NEXTAUTH_URL=https://your-domain.com
 OLLAMA_BASE_URL=http://ollama-service:11434
-OLLAMA_MODEL=gemma3:4b
+OLLAMA_MODEL=mistral:7b
 ```
 
 ## Documentation

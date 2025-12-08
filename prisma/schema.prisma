@@ -65,15 +65,38 @@ model Course_Material {
   parsedContent           String? // Markdown content parsed from PDF
   parsingStatus           Parsing_Status            @default(PENDING) // Track parsing progress
   parsingError            String? // Store any parsing errors
+  embeddingStatus         Parsing_Status            @default(PENDING) // Track embedding progress
+  embeddingError          String? // Store any embedding errors
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
   course                  Course                    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   uploadedBy              User                      @relation(fields: [uploadedById], references: [id])
   Question_Generation_Job Question_Generation_Job[]
   questions               Question[]
+  chunks                  Material_Chunk[]
 
   @@index([id, courseId])
+  @@index([courseId, unit])
   @@map("course_material")
+}
+
+model Material_Chunk {
+  id         String          @id @default(uuid())
+  materialId String
+  unit       Int             @default(0)
+  chunkIndex Int // Order of chunk within material
+  title      String? // Section title/heading
+  content    String // Chunk text content
+  embedding  Float[] // Vector embedding (stored as array)
+  tokenCount Int // Number of tokens in chunk
+  metadata   Json? // Additional metadata (keywords, etc.)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  material   Course_Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([materialId, unit])
+  @@index([materialId, chunkIndex])
+  @@map("material_chunks")
 }
 
 model Question {

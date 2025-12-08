@@ -615,6 +615,7 @@ export const coordinatorRouter = createTRPCRouter({
           });
         }
 
+        // Check if material is parsed and embedded
         if (!material.parsedContent) {
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -623,27 +624,35 @@ export const coordinatorRouter = createTRPCRouter({
           });
         }
 
-        // Validate content length
-        const contentLength = material.parsedContent.trim().length;
-        console.log(`[Question Generation] Material ID: ${material.id}`);
-        console.log(`[Question Generation] Material Title: ${material.title}`);
-        console.log(
-          `[Question Generation] Parsed Content Length: ${contentLength} characters`
-        );
-        console.log(
-          `[Question Generation] Content Preview: ${material.parsedContent.substring(
-            0,
-            500
-          )}...`
-        );
+        // Fetch chunks for this material and unit
+        const chunks = await prisma.material_Chunk.findMany({
+          where: {
+            materialId: input.materialId,
+            unit: material.unit,
+          },
+          orderBy: {
+            chunkIndex: "asc",
+          },
+        });
 
-        if (contentLength < 100) {
+        if (chunks.length === 0) {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message:
-              "Material content is too short (less than 100 characters). Please upload a proper PDF with content.",
+              "Material chunks not found. The material may still be processing embeddings. Please wait a moment and try again.",
           });
         }
+
+        // Combine all chunks into a single context
+        const materialContent = chunks.map((chunk) => chunk.content).join("\n\n");
+
+        console.log(`[Question Generation] Material ID: ${material.id}`);
+        console.log(`[Question Generation] Material Title: ${material.title}`);
+        console.log(`[Question Generation] Unit: ${material.unit}`);
+        console.log(`[Question Generation] Chunks: ${chunks.length}`);
+        console.log(
+          `[Question Generation] Combined Content Length: ${materialContent.length} characters`
+        );
 
         // Create question generation job
         const job = await prisma.question_Generation_Job.create({
@@ -668,9 +677,9 @@ export const coordinatorRouter = createTRPCRouter({
 
         if (totalQuestions > 0) {
           try {
-            // Call AI service to generate questions
+            // Call AI service to generate questions using chunks
             const generatedQuestions = await generateQuestionsWithAI({
-              materialContent: material.parsedContent,
+              materialContent: materialContent, // Use combined chunks instead of full parsedContent
               courseName: material.course.name,
               materialName: material.title,
               unit: material.unit,

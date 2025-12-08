@@ -19,6 +19,8 @@ import { OLLAMA_SYSTEM_PROMPT } from "./prompts/ollama-prompt";
  */
 export const OLLAMA_MODELS = {
   GEMMA_3_4B: "gemma3:4b",
+  DEEPSEEK_R1_14B: "deepseek-r1:14b", // Recommended for high-quality question generation
+  DEEPSEEK_R1_8B: "deepseek-r1:8b",
   LLAMA_3_2_3B: "llama3.2:3b",
   LLAMA_3_2_1B: "llama3.2:1b",
   LLAMA_3_1_8B: "llama3.1:8b",
@@ -53,7 +55,11 @@ export class OllamaProvider implements AIProvider {
       process.env.DEFAULT_AI_MODEL ||
       OLLAMA_MODELS.GEMMA_3_4B;
     this.temperature = config.temperature ?? 0.7;
-    this.maxTokens = config.maxTokens ?? 32000;
+    // Increased to 40k tokens for generating more content per question
+    // This allows for longer, more detailed answers and more questions in a single generation
+    // Note: Very high values may cause slower generation or GPU overheating
+    // For smaller models like gemma3:4b, consider using RAG with chunking instead
+    this.maxTokens = config.maxTokens ?? 40000;
     this.topP = config.topP ?? 0.9;
   }
 
@@ -167,7 +173,8 @@ export class OllamaProvider implements AIProvider {
     retryCount: number = 0
   ): Promise<GeneratedQuestion[]> {
     const prompt = this.buildPrompt(params, contentChunk);
-    const maxRetries = 2;
+    // Increased retries for better chance of meeting requirements
+    const maxRetries = 3;
 
     try {
       console.log(
@@ -217,10 +224,98 @@ export class OllamaProvider implements AIProvider {
 
       const parsedResponse = this.parseQuestionResponse(generatedText);
 
-      console.log(
-        `[Ollama] Successfully generated ${parsedResponse.questions.length} questions`
+      // Filter out invalid questions (empty text, etc.)
+      const validQuestions = this.filterValidQuestions(
+        parsedResponse.questions
       );
-      return parsedResponse.questions;
+
+      // Check if we got the expected counts
+      const counts = this.countQuestionsByDifficulty(validQuestions);
+      const expected = params.questionCounts;
+
+      console.log(
+        `[Ollama] Generated ${
+          validQuestions.length
+        } valid questions (Expected: ${
+          expected.easy + expected.medium + expected.hard
+        })`
+      );
+      console.log(
+        `[Ollama] Difficulty counts - EASY: ${counts.easy}/${expected.easy}, MEDIUM: ${counts.medium}/${expected.medium}, HARD: ${counts.hard}/${expected.hard}`
+      );
+
+      // Check question type counts
+      const typeCounts = this.countQuestionsByType(validQuestions);
+      const expectedTypes = params.questionTypes;
+
+      console.log(
+        `[Ollama] Question type counts - DIRECT: ${typeCounts.direct}/${expectedTypes.direct}, SCENARIO_BASED: ${typeCounts.scenarioBased}/${expectedTypes.scenarioBased}, PROBLEM_BASED: ${typeCounts.problemBased}/${expectedTypes.problemBased}, INDIRECT: ${typeCounts.indirect}/${expectedTypes.indirect}`
+      );
+
+      // Calculate total expected and actual
+      const totalExpected = expected.easy + expected.medium + expected.hard;
+      const totalActual = validQuestions.length;
+
+      // Accept if we have at least 80% of expected questions (less strict retry logic)
+      const acceptanceThreshold = 0.8;
+      const hasEnoughTotal = totalActual >= totalExpected * acceptanceThreshold;
+
+      // If counts don't match significantly and we haven't exceeded retries, retry with adjusted prompt
+      // Only retry if we're missing more than 20% of questions
+      const needsRetry =
+        !hasEnoughTotal ||
+        (expected.easy > 0 &&
+          counts.easy < expected.easy * acceptanceThreshold) ||
+        (expected.medium > 0 &&
+          counts.medium < expected.medium * acceptanceThreshold) ||
+        (expected.hard > 0 &&
+          counts.hard < expected.hard * acceptanceThreshold) ||
+        (expectedTypes.direct > 0 &&
+          typeCounts.direct < expectedTypes.direct * acceptanceThreshold) ||
+        (expectedTypes.scenarioBased > 0 &&
+          typeCounts.scenarioBased <
+            expectedTypes.scenarioBased * acceptanceThreshold) ||
+        (expectedTypes.problemBased > 0 &&
+          typeCounts.problemBased <
+            expectedTypes.problemBased * acceptanceThreshold) ||
+        (expectedTypes.indirect > 0 &&
+          typeCounts.indirect < expectedTypes.indirect * acceptanceThreshold);
+
+      if (needsRetry && retryCount < maxRetries) {
+        console.warn(
+          `[Ollama] Question counts don't match. Retrying with stronger prompt (attempt ${
+            retryCount + 2
+          }/${maxRetries + 1})...`
+        );
+        console.warn(
+          `[Ollama] Missing: EASY=${Math.max(
+            0,
+            expected.easy - counts.easy
+          )}, MEDIUM=${Math.max(
+            0,
+            expected.medium - counts.medium
+          )}, HARD=${Math.max(0, expected.hard - counts.hard)}`
+        );
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        return this.generateQuestionsFromChunk(
+          params,
+          contentChunk,
+          retryCount + 1
+        );
+      }
+
+      // If we still don't have enough questions after retries, log a warning
+      if (needsRetry && retryCount >= maxRetries) {
+        console.error(
+          `[Ollama] WARNING: Failed to generate required question counts after ${
+            maxRetries + 1
+          } attempts. Generated: ${validQuestions.length}, Expected: ${
+            expected.easy + expected.medium + expected.hard
+          }`
+        );
+      }
+
+      return validQuestions;
     } catch (error) {
       console.error(`[Ollama] Attempt ${retryCount + 1} failed:`, error);
 
@@ -265,46 +360,81 @@ UNIT: ${params.unit}
 
 You must generate ${totalQuestions} high-quality, exam-ready questions based STRICTLY on the course material provided below.
 
-== MANDATORY REQUIREMENTS ==
+== MANDATORY REQUIREMENTS - EXACT COUNTS REQUIRED ==
 
-1. QUESTION COUNT & DIFFICULTY DISTRIBUTION:
-   - EASY difficulty: EXACTLY ${easy} questions
+⚠️ CRITICAL: You MUST generate the EXACT number of questions specified. Do NOT generate fewer or more questions.
+
+1. QUESTION COUNT & DIFFICULTY DISTRIBUTION (MANDATORY EXACT COUNTS):
+   - EASY difficulty: EXACTLY ${easy} questions (REQUIRED - NOT ${
+      easy === 0 ? 0 : easy - 1
+    }, NOT ${easy + 1}, EXACTLY ${easy})
      * Marks: 2 marks each
-     * Answer length: 50-100 words
-     * Bloom's: REMEMBER or UNDERSTAND
+     * Answer length: MINIMUM 50 words, ideally 80-120 words (MUST be detailed, expand with examples)
+     * Bloom's: REMEMBER or UNDERSTAND ONLY
+     * If ${easy} = 0, generate ZERO easy questions
    
-   - MEDIUM difficulty: EXACTLY ${medium} questions
+   - MEDIUM difficulty: EXACTLY ${medium} questions (REQUIRED - NOT ${
+      medium === 0 ? 0 : medium - 1
+    }, NOT ${medium + 1}, EXACTLY ${medium})
      * Marks: 8 marks each
-     * Answer length: 400-600 words
-     * Bloom's: APPLY or ANALYZE
+     * Answer length: MINIMUM 200 words, ideally 300-500 words (MUST be comprehensive with examples, comparisons)
+     * Bloom's: APPLY or ANALYZE ONLY
+     * If ${medium} = 0, generate ZERO medium questions
    
-   - HARD difficulty: EXACTLY ${hard} questions
+   - HARD difficulty: EXACTLY ${hard} questions (REQUIRED - NOT ${
+      hard === 0 ? 0 : hard - 1
+    }, NOT ${hard + 1}, EXACTLY ${hard})
      * Marks: 16 marks each
-     * Answer length: 1000-1500 words
-     * Bloom's: EVALUATE or CREATE
+     * Answer length: MINIMUM 500 words, ideally 800-1200 words (MUST be exhaustive with multiple sections)
+     * Bloom's: EVALUATE or CREATE ONLY
+     * If ${hard} = 0, generate ZERO hard questions
+
+TOTAL QUESTIONS REQUIRED: ${totalQuestions} (EASY: ${easy} + MEDIUM: ${medium} + HARD: ${hard} = ${totalQuestions})
 
 2. BLOOM'S TAXONOMY ALIGNMENT (STRICT):
    - REMEMBER level: ${params.bloomLevels.remember} questions -> EASY, 2 marks
-   - UNDERSTAND level: ${params.bloomLevels.understand} questions -> EASY, 2 marks
+   - UNDERSTAND level: ${
+     params.bloomLevels.understand
+   } questions -> EASY, 2 marks
    - APPLY level: ${params.bloomLevels.apply} questions -> MEDIUM, 8 marks
    - ANALYZE level: ${params.bloomLevels.analyze} questions -> MEDIUM, 8 marks
    - EVALUATE level: ${params.bloomLevels.evaluate} questions -> HARD, 16 marks
    - CREATE level: ${params.bloomLevels.create} questions -> HARD, 16 marks
 
-3. QUESTION TYPES (ALL THREE REQUIRED):
-   - DIRECT type: ${params.questionTypes.direct} questions (definitions, explanations, lists)
-   - SCENARIO_BASED type: ${params.questionTypes.scenarioBased} questions (real-world situations)
-   - PROBLEM_BASED type: ${params.questionTypes.problemBased} questions (apply theory, solve problems)
+3. QUESTION TYPES (MANDATORY EXACT COUNTS):
+   - DIRECT type: EXACTLY ${
+     params.questionTypes.direct
+   } questions (definitions, explanations, lists, identify/name questions)
+   - SCENARIO_BASED type: EXACTLY ${
+     params.questionTypes.scenarioBased
+   } questions (real-world situations, case studies, applied scenarios)
+   - PROBLEM_BASED type: EXACTLY ${
+     params.questionTypes.problemBased
+   } questions (apply theory, solve problems, calculations, step-by-step solutions)
+   - INDIRECT type: EXACTLY ${
+     params.questionTypes.indirect
+   } questions (if specified, otherwise 0)
+   
+   CRITICAL: You MUST generate the EXACT number of each question type specified above.
 
 4. QUALITY STANDARDS (NON-NEGOTIABLE):
-   - Read the material DEEPLY - cover ALL major concepts
+   - Read the material DEEPLY - cover ALL major concepts, definitions, diagrams, classifications
    - Generate questions on definitions, diagrams, comparisons, applications, real-world uses
-   - Write DETAILED, exam-ready answers based strictly on material
-   - Include marks in question text: "(X Marks)"
-   - Provide bloom_justification for every question
-   - Use structured formatting (bullet points, tables, paragraphs)
-   - NO generic/placeholder answers
-   - NO repetition
+   - Write DETAILED, exam-ready answers based STRICTLY on material (NO generic content)
+   - ANSWER LENGTH IS CRITICAL - Write LONG, DETAILED answers (THIS IS MANDATORY):
+     * 2 marks: Write at least 30-50 words MINIMUM (expand with examples, details, context - not just 1-2 sentences)
+     * 8 marks: Write at least 100-200 words MINIMUM (comprehensive explanation with multiple points, examples, comparisons, step-by-step breakdowns)
+     * 16 marks: Write at least 300-500 words MINIMUM (exhaustive coverage with introduction, multiple sections, examples, analysis, comparisons, conclusion)
+   - DO NOT write short answers - Always expand with more detail, examples, explanations, comparisons, step-by-step breakdowns, and context
+   - Include marks in question text: "(X Marks)" - REQUIRED for every question
+   - Provide bloom_justification for every question explaining why that Bloom's level was chosen
+   - Use PLAIN TEXT formatting (NO markdown: no bold asterisks, no italic, no headers, no code blocks)
+   - Use structured formatting: numbered lists (1. 2. 3.), bullet points (-), clear paragraphs
+   - NO generic/placeholder answers like "[Answer here]" or "as mentioned in material"
+   - NO repetition - every question must be unique and cover different concepts
+   - Answers must be COMPLETE and DETAILED - no vague or incomplete explanations
+   - For HARD questions: Include introduction, multiple subsections, examples, comparisons, critical analysis, conclusion
+   - EXPAND your answers - add more detail, examples, explanations, comparisons, and context
 
 ==================== COURSE MATERIAL STARTS ====================
 ${content}
@@ -322,7 +452,7 @@ Return ONLY valid JSON (no markdown, no extra text):
       "difficulty_level": "EASY|MEDIUM|HARD",
       "bloom_level": "REMEMBER|UNDERSTAND|APPLY|ANALYZE|EVALUATE|CREATE",
       "bloom_justification": "Explanation of why this Bloom's level...",
-      "question_type": "DIRECT|SCENARIO_BASED|PROBLEM_BASED",
+      "question_type": "DIRECT|SCENARIO_BASED|PROBLEM_BASED|INDIRECT",
       "marks": "TWO|EIGHT|SIXTEEN",
       "unit_number": ${params.unit},
       "course_name": "${params.courseName}",
@@ -331,7 +461,28 @@ Return ONLY valid JSON (no markdown, no extra text):
   ]
 }
 
-CRITICAL: Start response with { immediately. NO text before or after JSON.`;
+CRITICAL REQUIREMENTS:
+1. Start response with { immediately. NO text before or after JSON.
+2. Generate EXACTLY ${totalQuestions} questions total
+3. Generate EXACTLY ${easy} EASY questions
+4. Generate EXACTLY ${medium} MEDIUM questions  
+5. Generate EXACTLY ${hard} HARD questions
+6. Generate EXACTLY ${params.questionTypes.direct} DIRECT questions
+7. Generate EXACTLY ${
+      params.questionTypes.scenarioBased
+    } SCENARIO_BASED questions
+8. Generate EXACTLY ${params.questionTypes.problemBased} PROBLEM_BASED questions
+9. Use marks format: "TWO" for 2 marks, "EIGHT" for 8 marks, "SIXTEEN" for 16 marks
+10. ANSWER LENGTH IS CRITICAL - Write LONG, DETAILED answers (THIS IS MANDATORY):
+    - 2 marks: MINIMUM 30 words (ideally 50-80) - expand with examples, details, context, explanations
+    - 8 marks: MINIMUM 100 words (ideally 200-400) - comprehensive with multiple points, examples, comparisons, step-by-step breakdowns
+    - 16 marks: MINIMUM 300 words (ideally 500-800) - exhaustive with introduction, sections, examples, analysis, comparisons, conclusion
+11. DO NOT write short answers - Always expand with more detail, examples, explanations, comparisons, step-by-step breakdowns, and context
+12. Match Bloom's levels correctly: EASY=REMEMBER/UNDERSTAND, MEDIUM=APPLY/ANALYZE, HARD=EVALUATE/CREATE
+13. GENERATE ALL QUESTIONS - Do not stop early. You MUST generate all ${totalQuestions} questions even if it takes longer
+14. If you find yourself writing short answers, STOP and EXPAND them with more detail, examples, and explanations
+
+DO NOT generate fewer questions. If you cannot generate all ${totalQuestions} questions, you MUST still try to generate as many as possible.`;
   }
 
   /**
@@ -345,11 +496,20 @@ CRITICAL: Start response with { immediately. NO text before or after JSON.`;
     questions: GeneratedQuestion[];
   } {
     try {
+      // Clean the response: remove markdown code blocks if present
+      let cleanedResponse = response.trim();
+
+      // Remove markdown code blocks (```json ... ``` or ``` ... ```)
+      cleanedResponse = cleanedResponse.replace(/^```(?:json)?\s*\n?/gm, "");
+      cleanedResponse = cleanedResponse.replace(/\n?```\s*$/gm, "");
+      cleanedResponse = cleanedResponse.trim();
+
       // Try to find JSON object with questions array
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      const jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         console.error("[Ollama] No JSON object found in response");
         console.error("[Ollama] Full response:", response);
+        console.error("[Ollama] Cleaned response:", cleanedResponse);
         throw new Error("No valid JSON found in response");
       }
 
@@ -410,6 +570,62 @@ CRITICAL: Start response with { immediately. NO text before or after JSON.`;
         }`
       );
     }
+  }
+
+  /**
+   * Strip markdown formatting from text while preserving content
+   */
+  private stripMarkdown(text: string): string {
+    if (!text || typeof text !== "string") {
+      return text;
+    }
+
+    let cleaned = text;
+
+    // Remove markdown code blocks (already handled in parseQuestionResponse, but keep for safety)
+    cleaned = cleaned.replace(/```[\s\S]*?```/g, "");
+    cleaned = cleaned.replace(/`[^`]*`/g, "");
+
+    // Remove markdown links but keep the text: [text](url) -> text
+    cleaned = cleaned.replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1");
+
+    // Remove markdown images: ![alt](url) -> alt
+    cleaned = cleaned.replace(/!\[([^\]]*)\]\([^\)]+\)/g, "$1");
+
+    // Remove markdown headers (# Header -> Header)
+    cleaned = cleaned.replace(/^#{1,6}\s+(.+)$/gm, "$1");
+
+    // Remove bold: **text** or __text__ -> text (handle multiple occurrences, including colons and other punctuation)
+    // Match **text** even if text contains special characters
+    cleaned = cleaned.replace(/\*\*([^*]+?)\*\*/g, "$1");
+    cleaned = cleaned.replace(/__([^_]+?)__/g, "$1");
+
+    // Remove italic: *text* or _text_ -> text (be careful with edge cases)
+    // Only match if not part of bold markers
+    cleaned = cleaned.replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, "$1");
+    cleaned = cleaned.replace(/(?<!_)_([^_\n]+?)_(?!_)/g, "$1");
+
+    // Remove markdown list markers but keep content
+    // Handle numbered lists: "1. " or "2.  " (with any number of spaces) -> ""
+    cleaned = cleaned.replace(/^\s*\d+\.\s+/gm, "");
+    // Handle bullet points: "- " or "* " or "+ " -> ""
+    cleaned = cleaned.replace(/^\s*[-*+]\s+/gm, "");
+
+    // Remove horizontal rules
+    cleaned = cleaned.replace(/^[-*_]{3,}$/gm, "");
+
+    // Remove markdown blockquotes: > text -> text
+    cleaned = cleaned.replace(/^>\s+(.+)$/gm, "$1");
+
+    // Remove markdown tables (basic) - replace pipe with space
+    cleaned = cleaned.replace(/\|/g, " ");
+
+    // Clean up extra whitespace (but preserve intentional line breaks)
+    cleaned = cleaned.replace(/\n{3,}/g, "\n\n"); // Max 2 consecutive newlines
+    cleaned = cleaned.replace(/[ \t]{2,}/g, " "); // Multiple spaces/tabs to single space (but preserve single spaces)
+    cleaned = cleaned.trim();
+
+    return cleaned;
   }
 
   private sanitizeQuestions(
@@ -501,31 +717,54 @@ CRITICAL: Start response with { immediately. NO text before or after JSON.`;
         | "HARD";
 
       // Get marks value and sanitize it
+      // Handle both numeric ("2", "8", "16") and text ("TWO", "EIGHT", "SIXTEEN") formats
       const rawMarks = getTextValue("marks");
-      const marksValue =
-        rawMarks ||
-        (normalizedDifficulty === "EASY"
-          ? "TWO"
-          : normalizedDifficulty === "HARD"
-          ? "SIXTEEN"
-          : "EIGHT");
+      let marksValue = rawMarks || "";
+
+      // Convert numeric marks to text format
+      if (marksValue === "2" || marksValue === "TWO") {
+        marksValue = "TWO";
+      } else if (marksValue === "8" || marksValue === "EIGHT") {
+        marksValue = "EIGHT";
+      } else if (marksValue === "16" || marksValue === "SIXTEEN") {
+        marksValue = "SIXTEEN";
+      } else if (!marksValue) {
+        // Default based on difficulty
+        marksValue =
+          normalizedDifficulty === "EASY"
+            ? "TWO"
+            : normalizedDifficulty === "HARD"
+            ? "SIXTEEN"
+            : "EIGHT";
+      }
+
       const normalizedMarks = marksValue.toUpperCase().trim();
 
       // Log if marks is not a valid value
       if (!["TWO", "EIGHT", "SIXTEEN"].includes(normalizedMarks)) {
         console.warn(
-          `[Ollama] Invalid marks value "${marksValue}" (normalized: "${normalizedMarks}"), defaulting based on difficulty ${normalizedDifficulty}`
+          `[Ollama] Invalid marks value "${rawMarks}" (normalized: "${normalizedMarks}"), defaulting based on difficulty ${normalizedDifficulty}`
         );
+        marksValue =
+          normalizedDifficulty === "EASY"
+            ? "TWO"
+            : normalizedDifficulty === "HARD"
+            ? "SIXTEEN"
+            : "EIGHT";
       }
 
       // Map any potential field name variations to standard names
+      // Strip markdown from question and answer text
+      const rawQuestionText = getTextValue(
+        "question_text",
+        "question",
+        "questionText"
+      );
+      const rawAnswerText = getTextValue("answer_text", "answer", "answerText");
+
       const sanitized: GeneratedQuestion = {
-        question_text: getTextValue(
-          "question_text",
-          "question",
-          "questionText"
-        ),
-        answer_text: getTextValue("answer_text", "answer", "answerText"),
+        question_text: this.stripMarkdown(rawQuestionText),
+        answer_text: this.stripMarkdown(rawAnswerText),
         difficulty_level: normalizedDifficulty,
         bloom_level: (
           getTextValue("bloom_level", "bloomLevel") || "UNDERSTAND"
@@ -552,6 +791,108 @@ CRITICAL: Start response with { immediately. NO text before or after JSON.`;
 
       return sanitized;
     });
+  }
+
+  /**
+   * Filter out invalid questions (empty text, placeholders, etc.)
+   */
+  private filterValidQuestions(
+    questions: GeneratedQuestion[]
+  ): GeneratedQuestion[] {
+    return questions.filter((q) => {
+      // Must have non-empty question text
+      if (!q.question_text || q.question_text.trim().length < 10) {
+        console.warn(
+          `[Ollama] Filtering out question with empty/invalid question_text`
+        );
+        return false;
+      }
+
+      // Must have non-empty answer text
+      if (!q.answer_text || q.answer_text.trim().length < 20) {
+        console.warn(
+          `[Ollama] Filtering out question with empty/invalid answer_text`
+        );
+        return false;
+      }
+
+      // Check answer length based on marks/difficulty
+      // More lenient requirements - focus on quality over strict word counts
+      // Reduced minimums to prevent over-filtering while still ensuring basic quality
+      const answerWords = q.answer_text
+        .split(/\s+/)
+        .filter((w) => w.length > 0).length;
+
+      // Very lenient minimums: 2 marks = 15 words, 8 marks = 80 words, 16 marks = 200 words
+      // This prevents filtering out valid questions while still removing placeholder/empty answers
+      const minWords = q.marks === "TWO" ? 15 : q.marks === "EIGHT" ? 80 : 200;
+
+      if (answerWords < minWords) {
+        console.warn(
+          `[Ollama] Filtering out question with answer too short: ${answerWords} words (minimum: ${minWords} for ${q.marks} marks)`
+        );
+        return false;
+      }
+
+      // Check for placeholder patterns
+      const placeholderPatterns = [
+        /\[Mock\s+(EASY|MEDIUM|HARD)\]/i,
+        /\[Answer here\]/i,
+        /\[Insert.*\]/i,
+        /placeholder/i,
+      ];
+
+      for (const pattern of placeholderPatterns) {
+        if (pattern.test(q.question_text) || pattern.test(q.answer_text)) {
+          console.warn(`[Ollama] Filtering out question with placeholder text`);
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }
+
+  /**
+   * Count questions by difficulty level
+   */
+  private countQuestionsByDifficulty(questions: GeneratedQuestion[]): {
+    easy: number;
+    medium: number;
+    hard: number;
+  } {
+    const counts = { easy: 0, medium: 0, hard: 0 };
+    questions.forEach((q) => {
+      if (q.difficulty_level === "EASY") counts.easy++;
+      else if (q.difficulty_level === "MEDIUM") counts.medium++;
+      else if (q.difficulty_level === "HARD") counts.hard++;
+    });
+    return counts;
+  }
+
+  /**
+   * Count questions by type
+   */
+  private countQuestionsByType(questions: GeneratedQuestion[]): {
+    direct: number;
+    scenarioBased: number;
+    problemBased: number;
+    indirect: number;
+  } {
+    const counts = {
+      direct: 0,
+      scenarioBased: 0,
+      problemBased: 0,
+      indirect: 0,
+    };
+    questions.forEach((q) => {
+      const type = q.question_type?.toUpperCase();
+      if (type === "DIRECT") counts.direct++;
+      else if (type === "SCENARIO_BASED") counts.scenarioBased++;
+      else if (type === "PROBLEM_BASED") counts.problemBased++;
+      else if (type === "INDIRECT") counts.indirect++;
+    });
+    return counts;
   }
 
   private validateDifficultyDistribution(questions: GeneratedQuestion[]): void {
@@ -646,14 +987,15 @@ CRITICAL: Start response with { immediately. NO text before or after JSON.`;
         const answerWords = question.answer_text
           .split(/\s+/)
           .filter((w) => w.length > 0).length;
+        // Updated to match new minimums: 15/80/200
         const minWords =
           question.marks === "TWO"
-            ? 30
+            ? 15
             : question.marks === "EIGHT"
-            ? 200
+            ? 80
             : question.marks === "SIXTEEN"
-            ? 500
-            : 30;
+            ? 200
+            : 15;
 
         if (answerWords < minWords) {
           console.warn(

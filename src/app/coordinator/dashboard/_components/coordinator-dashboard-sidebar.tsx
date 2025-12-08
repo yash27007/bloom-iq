@@ -7,6 +7,7 @@ import {
     User2,
     PanelLeftOpen,
     LogOut,
+    Plus,
 } from "lucide-react";
 import { SiBookstack } from "react-icons/si";
 import { RiGeminiFill } from "react-icons/ri";
@@ -214,6 +215,17 @@ export const CoordinatorDashboardSidebar = ({ user }: CoordinatorDashboardSideba
                                     isCollapsed={isCollapsed}
                                 />
                             ))}
+                            {/* Show Generate Question Paper only for Controller of Examination */}
+                            {user?.role === "CONTROLLER_OF_EXAMINATION" && (
+                                <MenuItemWithTooltip
+                                    item={{
+                                        title: "Generate Question Paper",
+                                        url: "/coordinator/dashboard/generate-paper",
+                                        icon: Plus,
+                                    }}
+                                    isCollapsed={isCollapsed}
+                                />
+                            )}
                         </SidebarMenu>
                     </SidebarGroupContent>
                 </SidebarGroup>
