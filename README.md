@@ -152,6 +152,8 @@ OLLAMA_MODEL=mistral:7b
 
 **For Longer Answers (if you have more RAM)**: `llama3.1:8b` - generates longer, more detailed answers but requires ~12GB RAM and runs slower.
 
+**For Smaller Models (gemma3:4b)**: The system uses RAG (Retrieval-Augmented Generation) with chunking and embeddings to improve quality. Materials are automatically chunked and embedded, allowing smaller models to generate better questions by using relevant context chunks.
+
 See [OLLAMA_SETUP.md](./OLLAMA_SETUP.md) for troubleshooting and advanced configuration.
 
 ## Project Structure
