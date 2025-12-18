@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: bloom_iq
       POSTGRES_USER: bloom_user
-      POSTGRES_PASSWORD: bloom_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bloom_password}
     ports:
       - "5432:5432"
     volumes:
@@ -18,6 +18,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - bloom-iq-network
 
   chromadb:
     image: chromadb/chroma:latest
@@ -35,8 +37,63 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - bloom-iq-network
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: bloom-iq-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - bloom-iq-network
+    # Note: Model will be pulled on first use or manually
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bloom-iq-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://bloom_user:${POSTGRES_PASSWORD:-bloom_password}@postgres:5432/bloom_iq
+      - DIRECT_URL=postgresql://bloom_user:${POSTGRES_PASSWORD:-bloom_password}@postgres:5432/bloom_iq
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-change-this-in-production}
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_URL=http://ollama:11434
+      - DEFAULT_AI_MODEL=${OLLAMA_MODEL:-mistral:7b}
+      - AI_PROVIDER=${AI_PROVIDER:-OLLAMA}
+      - CHROMA_URL=http://chromadb:8000
+      - CHROMA_COLLECTION=material_chunks
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - ./src/uploads:/app/src/uploads
+      - ./prisma:/app/prisma
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - bloom-iq-network
+
+networks:
+  bloom-iq-network:
+    driver: bridge
 
 volumes:
   postgres_data:
     driver: local
   chroma_data:
+    driver: local
+  ollama_data:
+    driver: local
