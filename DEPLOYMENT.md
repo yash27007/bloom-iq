@@ -152,10 +152,19 @@ NEXTAUTH_SECRET=your-super-secret-key-minimum-32-characters-long-change-this
 NEXTAUTH_URL=https://your-domain.com
 
 # AI Configuration
+# Choose provider: "GEMINI" or "OLLAMA"
+AI_PROVIDER=OLLAMA
+
+# Ollama Configuration (when AI_PROVIDER=OLLAMA)
 OLLAMA_BASE_URL=http://ollama:11434
 OLLAMA_URL=http://ollama:11434
 OLLAMA_MODEL=mistral:7b
-AI_PROVIDER=OLLAMA
+
+# Gemini Configuration (when AI_PROVIDER=GEMINI)
+GEMINI_API_KEY=your_gemini_api_key_if_using
+GEMINI_MODEL=gemini-2.5-flash
+
+# Default model (fallback)
 DEFAULT_AI_MODEL=mistral:7b
 
 # Vector Database

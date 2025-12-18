@@ -66,13 +66,20 @@ services:
       - DIRECT_URL=postgresql://bloom_user:${POSTGRES_PASSWORD:-bloom_password}@postgres:5432/bloom_iq
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-change-this-in-production}
       - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+      # AI Provider Configuration - Set AI_PROVIDER to "GEMINI" or "OLLAMA"
+      - AI_PROVIDER=${AI_PROVIDER:-OLLAMA}
+      # Ollama Configuration (used when AI_PROVIDER=OLLAMA)
       - OLLAMA_BASE_URL=http://ollama:11434
       - OLLAMA_URL=http://ollama:11434
-      - DEFAULT_AI_MODEL=${OLLAMA_MODEL:-mistral:7b}
-      - AI_PROVIDER=${AI_PROVIDER:-OLLAMA}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral:7b}
+      # Gemini Configuration (used when AI_PROVIDER=GEMINI)
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      # Default model (fallback)
+      - DEFAULT_AI_MODEL=${DEFAULT_AI_MODEL:-${OLLAMA_MODEL:-mistral:7b}}
+      # Vector Database
       - CHROMA_URL=http://chromadb:8000
       - CHROMA_COLLECTION=material_chunks
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
     volumes:
       - ./src/uploads:/app/src/uploads
       - ./prisma:/app/prisma

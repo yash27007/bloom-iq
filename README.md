@@ -88,10 +88,19 @@ DIRECT_URL=postgresql://bloom_user:bloom_password@localhost:5432/bloom_iq
 NEXTAUTH_SECRET=your-super-secret-key-change-this-minimum-32-characters
 NEXTAUTH_URL=http://localhost:3000
 
-# Ollama AI
+# AI Provider Configuration
+# Choose: "GEMINI" or "OLLAMA"
+AI_PROVIDER=OLLAMA
+
+# Ollama Configuration (when AI_PROVIDER=OLLAMA)
 OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=mistral:7b
 OLLAMA_EMBEDDING_MODEL=nomic-embed-text:v1.5
+
+# Gemini Configuration (when AI_PROVIDER=GEMINI)
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-2.5-flash
 
 # ChromaDB (Vector Database)
 CHROMA_URL=http://localhost:8000
@@ -122,7 +131,23 @@ Access the application at http://localhost:3000
 
 ## AI Model Configuration
 
-BloomIQ uses **Ollama** for local AI model execution. No external API calls are made.
+BloomIQ supports **both Gemini and Ollama** AI providers. You can easily switch between them.
+
+### Quick Setup
+
+**Use Gemini** (Fast, cloud-based):
+```env
+AI_PROVIDER=GEMINI
+GEMINI_API_KEY=your_api_key
+```
+
+**Use Ollama** (Local, private):
+```env
+AI_PROVIDER=OLLAMA
+OLLAMA_URL=http://localhost:11434
+```
+
+See [AI_PROVIDER_SETUP.md](./AI_PROVIDER_SETUP.md) for detailed setup instructions.
 
 ### Available Models
 
