@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: bloom-iq-app
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bloom-iq-postgres
+          property: connectionString
+      - key: DIRECT_URL
+        fromDatabase:
+          name: bloom-iq-postgres
+          property: connectionString
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+      - key: NEXTAUTH_URL
+        fromService:
+          type: web
+          name: bloom-iq-app
+          property: host
+      - key: AI_PROVIDER
+        value: GEMINI
+      - key: CHROMA_URL
+        value: http://chromadb:8000
+
+databases:
+  - name: bloom-iq-postgres
+    plan: starter
+    databaseName: bloom_iq
+    user: bloom_user
+
