@@ -27,12 +27,13 @@ interface ApprovedPattern {
     id: string;
     patternName: string;
     academicYear: string;
-    semester: string;
+    semester?: string;
+    semesterType?: string;
     examType: string;
-    partA_count: number;
-    partA_marksEach: number;
-    partB_count: number;
-    partB_marksEach: number;
+    partA_count?: number;
+    partA_marksEach?: number;
+    partB_count?: number;
+    partB_marksEach?: number;
     totalMarks: number;
     duration: number;
     course: {
@@ -40,6 +41,14 @@ interface ApprovedPattern {
         course_code: string;
         name: string;
     };
+}
+
+interface PatternWithCalculatedFields extends ApprovedPattern {
+    semester: string;
+    partA_count: number;
+    partA_marksEach: number;
+    partB_count: number;
+    partB_marksEach: number;
 }
 
 export default function GeneratePaperPage() {
@@ -58,15 +67,15 @@ export default function GeneratePaperPage() {
 
     // Generate paper mutation
     const generateMutation = trpc.paper.generatePaper.useMutation({
-        onSuccess: (data: { paperId?: string }) => {
+        onSuccess: (data) => {
             toast.success("Question paper generated successfully!");
-            if (data.paperId) {
-                router.push(`/coordinator/dashboard/paper/${data.paperId}`);
+            if (data.paperId || data.paper?.id) {
+                router.push(`/coordinator/dashboard/paper/${data.paperId || data.paper.id}`);
             } else {
                 router.push("/coordinator/dashboard/view-papers");
             }
         },
-        onError: (error: { message?: string }) => {
+        onError: (error) => {
             toast.error(error.message || "Failed to generate paper");
         },
     });
@@ -102,7 +111,7 @@ export default function GeneratePaperPage() {
             </div>
 
             {/* Check if there are approved patterns */}
-            {!patterns || patterns.length === 0 ? (
+            {!patterns || (Array.isArray(patterns) && patterns.length === 0) ? (
                 <Card>
                     <CardContent className="py-12 text-center">
                         <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
@@ -132,12 +141,13 @@ export default function GeneratePaperPage() {
                                         <SelectValue placeholder="Select pattern" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {patterns.map((pattern: ApprovedPattern) => (
-                                            <SelectItem key={pattern.id} value={pattern.id}>
-                                                {pattern.course.course_code} - {pattern.patternName} (
-                                                {pattern.academicYear}, Sem {pattern.semester})
-                                            </SelectItem>
-                                        ))}
+                                        {Array.isArray(patterns) &&
+                                            patterns.map((pattern: ApprovedPattern) => (
+                                                <SelectItem key={pattern.id} value={pattern.id}>
+                                                    {pattern.course.course_code} - {pattern.patternName} (
+                                                    {pattern.academicYear}, {pattern.semesterType || pattern.semester || "N/A"})
+                                                </SelectItem>
+                                            ))}
                                     </SelectContent>
                                 </Select>
                             </div>
@@ -181,7 +191,7 @@ export default function GeneratePaperPage() {
                                     </div>
                                     <div>
                                         <p className="text-sm text-muted-foreground">Semester</p>
-                                        <p className="font-medium">Semester {selectedPattern.semester}</p>
+                                        <p className="font-medium">{(selectedPattern as PatternWithCalculatedFields).semesterType || (selectedPattern as PatternWithCalculatedFields).semester}</p>
                                     </div>
                                     <div>
                                         <p className="text-sm text-muted-foreground">Exam Type</p>
@@ -193,19 +203,19 @@ export default function GeneratePaperPage() {
                                     <div>
                                         <p className="text-sm text-muted-foreground">Part A</p>
                                         <p className="font-medium">
-                                            {selectedPattern.partA_count} questions × {selectedPattern.partA_marksEach} marks
+                                            {((selectedPattern as PatternWithCalculatedFields).partA_count || 0)} questions × {((selectedPattern as PatternWithCalculatedFields).partA_marksEach || 0)} marks
                                         </p>
                                         <p className="text-xs text-muted-foreground">
-                                            Total: {selectedPattern.partA_count * selectedPattern.partA_marksEach} marks
+                                            Total: {((selectedPattern as PatternWithCalculatedFields).partA_count || 0) * ((selectedPattern as PatternWithCalculatedFields).partA_marksEach || 0)} marks
                                         </p>
                                     </div>
                                     <div>
                                         <p className="text-sm text-muted-foreground">Part B</p>
                                         <p className="font-medium">
-                                            {selectedPattern.partB_count} questions × {selectedPattern.partB_marksEach} marks
+                                            {((selectedPattern as PatternWithCalculatedFields).partB_count || 0)} questions × {((selectedPattern as PatternWithCalculatedFields).partB_marksEach || 0)} marks
                                         </p>
                                         <p className="text-xs text-muted-foreground">
-                                            Total: {selectedPattern.partB_count * selectedPattern.partB_marksEach} marks
+                                            Total: {((selectedPattern as PatternWithCalculatedFields).partB_count || 0) * ((selectedPattern as PatternWithCalculatedFields).partB_marksEach || 0)} marks
                                         </p>
                                     </div>
                                     <div>

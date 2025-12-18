@@ -9,9 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { CheckCircle2, XCircle, Clock, Eye, MessageSquare, TrendingUp } from "lucide-react";
+import { CheckCircle2, XCircle, MessageSquare, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 
 type QuestionStatus = "CREATED_BY_COURSE_COORDINATOR" | "UNDER_REVIEW_FROM_MODULE_COORDINATOR" | "UNDER_REVIEW_FROM_PROGRAM_COORDINATOR" | "ACCEPTED" | "REJECTED";

@@ -185,6 +185,14 @@ export const paperRouter = createTRPCRouter({
         });
       }
 
+      // Validate input
+      if (!input.patternId || !input.setVariant) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Pattern ID and set variant are required",
+        });
+      }
+
       // Get the pattern
       const pattern = await prisma.questionPaperPattern.findUnique({
         where: { id: input.patternId },
@@ -267,6 +275,7 @@ export const paperRouter = createTRPCRouter({
 
       return {
         success: true,
+        paperId: paper.id,
         paper,
       };
     }),

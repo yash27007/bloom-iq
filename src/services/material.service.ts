@@ -15,6 +15,8 @@ import { join } from "path";
 import type { Material_Type } from "@/generated/prisma";
 import type { ServiceResult } from "./types";
 import { EmbeddingService } from "./embedding.service";
+import { VectorDBService } from "./vector-db.service";
+import { logger } from "@/lib/logger";
 
 /**
  * Material data transfer objects
@@ -85,10 +87,18 @@ export class MaterialService {
       },
     });
 
+    logger.logMaterialUpload(
+      material.id,
+      input.title,
+      input.courseId,
+      input.uploadedById
+    );
+
     // Start background PDF parsing (non-blocking)
     this.parsePDFInBackground(material.id, input.filename).catch((error) => {
-      console.error(
-        `Failed to start background parsing for ${material.id}:`,
+      logger.error(
+        "MaterialService",
+        `Failed to start background parsing for ${material.id}`,
         error
       );
     });
@@ -106,9 +116,12 @@ export class MaterialService {
     materialId: string,
     filename: string
   ): Promise<void> {
+    const startTime = Date.now();
     try {
-      console.log(
-        `[PDF Parser] Starting background parsing for material ${materialId}`
+      logger.info(
+        "PDFParser",
+        `Starting background parsing for material ${materialId}`,
+        { materialId, filename }
       );
 
       // Update status to PROCESSING
@@ -126,27 +139,19 @@ export class MaterialService {
       const validation = validateParsedContent(pdfContent);
 
       if (!validation.isValid) {
-        console.warn(
-          `[PDF Parser] Validation warnings for ${materialId}:`,
-          validation.warnings
-        );
+        logger.warn("PDFParser", `Validation warnings for ${materialId}`, {
+          materialId,
+          warnings: validation.warnings,
+        });
       }
 
-      // Log the parsed content
-      console.log(
-        `\n========== PARSED PDF CONTENT (Material ID: ${materialId}) ==========`
-      );
-      console.log(`Filename: ${filename}`);
-      console.log(`Pages: ${pdfContent.metadata.pages}`);
-      console.log(`Text Length: ${pdfContent.text.length} characters`);
-      console.log(`Markdown Length: ${pdfContent.markdown.length} characters`);
-      console.log(`\n--- Raw Text (Full) ---`);
-      console.log(pdfContent.text);
-      console.log(`\n--- Markdown Format (Full) ---`);
-      console.log(pdfContent.markdown);
-      console.log(`\n--- Full Metadata ---`);
-      console.log(JSON.stringify(pdfContent.metadata, null, 2));
-      console.log(`========== END OF PARSED CONTENT ==========\n`);
+      logger.info("PDFParser", `PDF parsed successfully`, {
+        materialId,
+        filename,
+        pages: pdfContent.metadata.pages,
+        textLength: pdfContent.text.length,
+        markdownLength: pdfContent.markdown.length,
+      });
 
       // Update the database with parsed content and get material unit
       const material = await prisma.course_Material.update({
@@ -161,22 +166,79 @@ export class MaterialService {
         },
       });
 
-      console.log(
-        `[PDF Parser] Successfully completed parsing for material ${materialId}`
+      const parseDuration = Date.now() - startTime;
+      logger.logPDFParsing(
+        materialId,
+        "COMPLETED",
+        undefined,
+        pdfContent.metadata.pages
       );
+      logger.info("PDFParser", `Parsing completed in ${parseDuration}ms`, {
+        materialId,
+        duration: parseDuration,
+      });
+
+      // Validate content before starting embedding
+      if (!pdfContent.markdown || pdfContent.markdown.trim().length === 0) {
+        logger.warn(
+          "MaterialService",
+          `No content to embed for material ${materialId}`,
+          { materialId }
+        );
+        await prisma.course_Material.update({
+          where: { id: materialId },
+          data: {
+            embeddingStatus: "FAILED",
+            embeddingError: "No parsed content available for embedding",
+          },
+        });
+        return;
+      }
 
       // Start background embedding (non-blocking)
-      this.embedMaterialInBackground(materialId, pdfContent.markdown, material.unit).catch((error) => {
-        console.error(
-          `Failed to start background embedding for ${materialId}:`,
-          error
+      logger.info(
+        "MaterialService",
+        `Triggering background embedding for material ${materialId}`,
+        {
+          materialId,
+          contentLength: pdfContent.markdown.length,
+          unit: material.unit,
+        }
+      );
+
+      this.embedMaterialInBackground(
+        materialId,
+        pdfContent.markdown,
+        material.unit
+      ).catch((error) => {
+        logger.error(
+          "MaterialService",
+          `Failed to start background embedding for ${materialId}`,
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            materialId,
+            errorMessage:
+              error instanceof Error ? error.message : String(error),
+            errorStack: error instanceof Error ? error.stack : undefined,
+          }
         );
       });
     } catch (error) {
-      console.error(
-        `[PDF Parser] Error parsing material ${materialId}:`,
-        error
+      const parseDuration = Date.now() - startTime;
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown parsing error";
+
+      logger.error(
+        "PDFParser",
+        `Error parsing material ${materialId}`,
+        error instanceof Error ? error : new Error(errorMessage),
+        {
+          materialId,
+          filename,
+          duration: parseDuration,
+        }
       );
+      logger.logPDFParsing(materialId, "FAILED", errorMessage);
 
       // Update status to FAILED with error message
       await prisma.course_Material
@@ -184,12 +246,15 @@ export class MaterialService {
           where: { id: materialId },
           data: {
             parsingStatus: "FAILED",
-            parsingError:
-              error instanceof Error ? error.message : "Unknown parsing error",
+            parsingError: errorMessage,
           },
         })
         .catch((dbError) => {
-          console.error(`[PDF Parser] Failed to update error status:`, dbError);
+          logger.error(
+            "PDFParser",
+            "Failed to update error status",
+            dbError instanceof Error ? dbError : new Error(String(dbError))
+          );
         });
     }
   }
@@ -197,15 +262,43 @@ export class MaterialService {
   /**
    * Background embedding generation (non-blocking)
    * Creates chunks and embeddings for the parsed material
+   * Can be called manually to retrigger embedding for a material
    */
-  private static async embedMaterialInBackground(
+  static async embedMaterialInBackground(
     materialId: string,
     content: string,
     unit: number
   ): Promise<void> {
+    const startTime = Date.now();
+
+    // Validate inputs immediately
+    if (!content || content.trim().length === 0) {
+      const error = new Error("Content is empty or null");
+      logger.error(
+        "EmbeddingService",
+        `Cannot embed empty content for material ${materialId}`,
+        error,
+        { materialId, unit }
+      );
+      await prisma.course_Material.update({
+        where: { id: materialId },
+        data: {
+          embeddingStatus: "FAILED",
+          embeddingError: "Content is empty or null",
+        },
+      });
+      return;
+    }
+
     try {
-      console.log(
-        `[Embedding] Starting background embedding for material ${materialId}, unit ${unit}`
+      logger.info(
+        "EmbeddingService",
+        `Starting background embedding for material ${materialId}`,
+        {
+          materialId,
+          unit,
+          contentLength: content.length,
+        }
       );
 
       // Update status to PROCESSING
@@ -215,61 +308,142 @@ export class MaterialService {
       });
 
       // Delete existing chunks for this material (in case of re-embedding)
+      // Delete from PostgreSQL (for backward compatibility)
       await prisma.material_Chunk.deleteMany({
         where: { materialId },
       });
 
+      // Delete from ChromaDB
+      const vectorDB = new VectorDBService();
+      try {
+        await vectorDB.deleteMaterialChunks(materialId);
+        logger.info(
+          "VectorDB",
+          `Deleted existing chunks from ChromaDB for material ${materialId}`,
+          { materialId }
+        );
+      } catch (vectorError) {
+        logger.warn(
+          "VectorDB",
+          `Failed to delete from ChromaDB (may not be initialized)`,
+          {
+            materialId,
+            error:
+              vectorError instanceof Error
+                ? vectorError.message
+                : String(vectorError),
+          }
+        );
+      }
+
       // Create embedding service and chunk/embed the content
       const embeddingService = new EmbeddingService();
-      
+
       // Test if embeddings are available
       const canEmbed = await embeddingService.testConnection();
       if (!canEmbed) {
-        console.warn(`[Embedding] Ollama connection failed, storing chunks without embeddings`);
+        logger.warn(
+          "EmbeddingService",
+          "Ollama connection failed, storing chunks without embeddings",
+          { materialId }
+        );
       }
 
-      let chunksWithEmbeddings;
-      try {
-        chunksWithEmbeddings = await embeddingService.chunkAndEmbed(
-          content,
-          unit,
-          {
-            maxTokensPerChunk: 3000,
-            minTokensPerChunk: 500,
-          }
-        );
-      } catch (embedError) {
-        console.warn(`[Embedding] Embedding failed, creating chunks without embeddings:`, embedError);
-        // Fallback: create chunks without embeddings
-        const { chunkContent } = await import("@/lib/content-chunker");
-        const chunks = await chunkContent(content, {
+      // Use chunkAndEmbed with progress tracking for better performance
+      // This processes embeddings in parallel batches (3 at a time)
+      const chunksWithEmbeddings = await embeddingService.chunkAndEmbed(
+        content,
+        unit,
+        {
           maxTokensPerChunk: 3000,
           minTokensPerChunk: 500,
-        });
-        
-        chunksWithEmbeddings = chunks.map((chunk, index) => ({
-          chunkIndex: index,
-          title: chunk.title,
-          content: chunk.content,
-          embedding: [], // Empty embedding
-          tokenCount: chunk.tokens,
-          metadata: chunk.metadata,
-        }));
+          onProgress: (current, total) => {
+            // Log progress every chunk
+            logger.logEmbeddingProgress(materialId, current, total);
+          },
+        }
+      );
+
+      // Filter out chunks with empty embeddings before storing
+      const validChunks = chunksWithEmbeddings.filter(
+        (chunk) => chunk.embedding && chunk.embedding.length > 0
+      );
+
+      if (validChunks.length === 0) {
+        logger.warn(
+          "EmbeddingService",
+          "No chunks with valid embeddings to store",
+          { materialId, totalChunks: chunksWithEmbeddings.length }
+        );
+        throw new Error("No chunks with valid embeddings generated");
       }
 
-      // Store chunks in database (with or without embeddings)
-      await prisma.material_Chunk.createMany({
-        data: chunksWithEmbeddings.map((chunk) => ({
+      // Batch store all chunks in ChromaDB (much more efficient than one-by-one)
+      const chunksToStore = validChunks.map((chunk) => ({
+        content: chunk.content,
+        embedding: chunk.embedding,
+        metadata: {
           materialId,
           unit,
           chunkIndex: chunk.chunkIndex,
           title: chunk.title,
-          content: chunk.content,
-          embedding: chunk.embedding.length > 0 ? chunk.embedding : [], // Store empty array if no embedding
           tokenCount: chunk.tokenCount,
-          metadata: chunk.metadata,
-        })),
-      });
+          ...chunk.metadata,
+        },
+      }));
+
+      // Store all chunks in ChromaDB in one batch operation
+      try {
+        await vectorDB.storeChunks(chunksToStore);
+        logger.info(
+          "VectorDB",
+          `Stored ${chunksToStore.length} chunks in ChromaDB`,
+          {
+            materialId,
+            chunkCount: chunksToStore.length,
+          }
+        );
+      } catch (vectorError) {
+        logger.warn(
+          "VectorDB",
+          `Failed to store in ChromaDB, falling back to PostgreSQL`,
+          {
+            materialId,
+            error:
+              vectorError instanceof Error
+                ? vectorError.message
+                : String(vectorError),
+          }
+        );
+
+        // Fallback to PostgreSQL - batch insert for efficiency
+        // Only store chunks with valid embeddings
+        await prisma.material_Chunk
+          .createMany({
+            data: validChunks.map((chunk) => ({
+              materialId,
+              unit,
+              chunkIndex: chunk.chunkIndex,
+              title: chunk.title,
+              content: chunk.content,
+              tokenCount: chunk.tokenCount, // Fixed: schema uses tokenCount, not tokens
+              embedding: chunk.embedding,
+              metadata: chunk.metadata,
+            })),
+            skipDuplicates: true,
+          })
+          .catch((dbError) => {
+            logger.error(
+              "EmbeddingService",
+              "Failed to store chunks in PostgreSQL",
+              dbError instanceof Error ? dbError : new Error(String(dbError)),
+              {
+                materialId,
+                chunkCount: chunksWithEmbeddings.length,
+              }
+            );
+          });
+      }
 
       // Update status to COMPLETED
       await prisma.course_Material.update({
@@ -280,13 +454,35 @@ export class MaterialService {
         },
       });
 
-      console.log(
-        `[Embedding] Successfully embedded ${chunksWithEmbeddings.length} chunks for material ${materialId}`
+      const embedDuration = Date.now() - startTime;
+      logger.logEmbeddingComplete(
+        materialId,
+        chunksWithEmbeddings.length,
+        embedDuration
+      );
+      logger.info(
+        "EmbeddingService",
+        `Successfully embedded ${chunksWithEmbeddings.length} chunks`,
+        {
+          materialId,
+          totalChunks: chunksWithEmbeddings.length,
+          duration: embedDuration,
+        }
       );
     } catch (error) {
-      console.error(
-        `[Embedding] Error embedding material ${materialId}:`,
-        error
+      const embedDuration = Date.now() - startTime;
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown embedding error";
+
+      logger.error(
+        "EmbeddingService",
+        `Error embedding material ${materialId}`,
+        error instanceof Error ? error : new Error(errorMessage),
+        {
+          materialId,
+          unit,
+          duration: embedDuration,
+        }
       );
 
       // Update status to FAILED with error message
@@ -295,12 +491,15 @@ export class MaterialService {
           where: { id: materialId },
           data: {
             embeddingStatus: "FAILED",
-            embeddingError:
-              error instanceof Error ? error.message : "Unknown embedding error",
+            embeddingError: errorMessage,
           },
         })
         .catch((dbError) => {
-          console.error(`[Embedding] Failed to update error status:`, dbError);
+          logger.error(
+            "EmbeddingService",
+            "Failed to update error status",
+            dbError instanceof Error ? dbError : new Error(String(dbError))
+          );
         });
     }
   }
@@ -381,18 +580,37 @@ export class MaterialService {
   }
 
   /**
-   * Delete material with file cleanup
+   * Delete material with complete cleanup:
+   * - ChromaDB embeddings
+   * - PostgreSQL chunks
+   * - Related questions
+   * - Question generation jobs
+   * - Chat history
+   * - Physical file
    */
   static async deleteMaterial(
     materialId: string
   ): Promise<ServiceResult<null>> {
     try {
+      logger.info(
+        "MaterialService",
+        `Starting deletion of material ${materialId}`,
+        {
+          materialId,
+        }
+      );
+
       // Get material details
       const material = await prisma.course_Material.findUnique({
         where: { id: materialId },
         select: {
           filePath: true,
-          _count: { select: { questions: true } },
+          _count: {
+            select: {
+              questions: true,
+              chunks: true,
+            },
+          },
         },
       });
 
@@ -400,39 +618,142 @@ export class MaterialService {
         throw new Error("Material not found.");
       }
 
-      // Delete associated questions
-      if (material._count.questions > 0) {
-        await prisma.question.deleteMany({
-          where: { materialId },
-        });
+      // 1. Delete embeddings from ChromaDB
+      try {
+        const vectorDB = new VectorDBService();
+        await vectorDB.deleteMaterialChunks(materialId);
+        logger.info(
+          "MaterialService",
+          `Deleted ChromaDB embeddings for material ${materialId}`,
+          {
+            materialId,
+          }
+        );
+      } catch (vectorError) {
+        logger.warn(
+          "MaterialService",
+          `Failed to delete ChromaDB embeddings (may not be initialized)`,
+          {
+            materialId,
+            error:
+              vectorError instanceof Error
+                ? vectorError.message
+                : String(vectorError),
+          }
+        );
+        // Continue with deletion even if ChromaDB fails
       }
 
-      // Delete the database record
+      // 2. Delete chunks from PostgreSQL (explicitly, though cascade should handle it)
+      const deletedChunks = await prisma.material_Chunk.deleteMany({
+        where: { materialId },
+      });
+      logger.info(
+        "MaterialService",
+        `Deleted ${deletedChunks.count} chunks from PostgreSQL`,
+        {
+          materialId,
+          chunkCount: deletedChunks.count,
+        }
+      );
+
+      // 3. Delete associated questions
+      const deletedQuestions = await prisma.question.deleteMany({
+        where: { materialId },
+      });
+      logger.info(
+        "MaterialService",
+        `Deleted ${deletedQuestions.count} related questions`,
+        {
+          materialId,
+          questionCount: deletedQuestions.count,
+        }
+      );
+
+      // 4. Delete question generation jobs
+      const deletedJobs = await prisma.question_Generation_Job.deleteMany({
+        where: { materialId },
+      });
+      logger.info(
+        "MaterialService",
+        `Deleted ${deletedJobs.count} question generation jobs`,
+        {
+          materialId,
+          jobCount: deletedJobs.count,
+        }
+      );
+
+      // 5. Delete chat history
+      const deletedChatHistory = await prisma.chat_History.deleteMany({
+        where: { materialId },
+      });
+      logger.info(
+        "MaterialService",
+        `Deleted ${deletedChatHistory.count} chat history entries`,
+        {
+          materialId,
+          chatCount: deletedChatHistory.count,
+        }
+      );
+
+      // 6. Delete the database record (this will cascade delete any remaining related data)
       await prisma.course_Material.delete({
         where: { id: materialId },
       });
+      logger.info("MaterialService", `Deleted material record: ${materialId}`, {
+        materialId,
+      });
 
-      // Delete the physical file
-      const filePath = join(process.cwd(), "src", "uploads", material.filePath);
+      // 7. Delete the physical file
+      const filePath = join(
+        process.cwd(),
+        "src",
+        material.filePath.replace("uploads/", "")
+      );
       try {
         await unlink(filePath);
-        console.log(`[Material Service] Deleted file: ${filePath}`);
+        logger.info("MaterialService", `Deleted physical file: ${filePath}`, {
+          materialId,
+          filePath,
+        });
       } catch (fileError) {
-        console.error(
-          `[Material Service] Failed to delete file ${filePath}:`,
-          fileError
-        );
+        logger.warn("MaterialService", `Failed to delete physical file`, {
+          materialId,
+          filePath,
+          error:
+            fileError instanceof Error ? fileError.message : String(fileError),
+        });
         // Don't throw - file might already be deleted or missing
       }
 
+      logger.info(
+        "MaterialService",
+        `Successfully deleted material ${materialId}`,
+        {
+          materialId,
+          deletedChunks: deletedChunks.count,
+          deletedQuestions: deletedQuestions.count,
+          deletedJobs: deletedJobs.count,
+          deletedChatHistory: deletedChatHistory.count,
+        }
+      );
+
       return {
-        message: `Material deleted successfully${
-          material._count.questions > 0
-            ? ` along with ${material._count.questions} associated question(s)`
-            : ""
-        }.`,
+        message: `Material deleted successfully along with:
+          - ${deletedChunks.count} chunk(s)
+          - ${deletedQuestions.count} question(s)
+          - ${deletedJobs.count} generation job(s)
+          - ${deletedChatHistory.count} chat history entry/entries`,
       };
     } catch (error) {
+      logger.error(
+        "MaterialService",
+        `Failed to delete material ${materialId}`,
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          materialId,
+        }
+      );
       if (error instanceof Error) {
         throw error;
       }

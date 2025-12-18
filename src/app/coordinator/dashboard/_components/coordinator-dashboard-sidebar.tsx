@@ -8,6 +8,8 @@ import {
     PanelLeftOpen,
     LogOut,
     Plus,
+    MessageSquare,
+    FileSearch,
 } from "lucide-react";
 import { SiBookstack } from "react-icons/si";
 import { RiGeminiFill } from "react-icons/ri";
@@ -58,6 +60,11 @@ const navigationItems = {
             url: "/coordinator/dashboard/course-management/generate-questions",
             icon: RiGeminiFill,
         },
+        {
+            title: "Chat with PDF",
+            url: "/coordinator/dashboard/course-management/chat-pdf",
+            icon: MessageSquare,
+        },
     ],
     questionPaper: [
         {
@@ -79,6 +86,11 @@ const navigationItems = {
             title: "Approve Patterns",
             url: "/coordinator/dashboard/question-paper/approve-patterns",
             icon: FileCheck,
+        },
+        {
+            title: "Validate Question Paper",
+            url: "/coordinator/dashboard/question-paper/validate",
+            icon: FileSearch,
         }
     ]
 };

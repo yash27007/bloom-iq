@@ -21,28 +21,50 @@ export type { QuestionGenerationParams, GeneratedQuestion };
  * based on the configuration (currently Ollama)
  *
  * @param params - Question generation parameters (counts, Bloom's levels, material content)
+ * @param model - Optional model name to use (defaults to configured model)
  * @returns Array of generated questions with answers
  * @throws Error if generation fails and not in development mode
  */
 export async function generateQuestionsWithAI(
-  params: QuestionGenerationParams
+  params: QuestionGenerationParams,
+  model?: string
 ): Promise<GeneratedQuestion[]> {
   try {
+    // Switch model if provided
+    if (model) {
+      aiService.switchModel(model);
+    }
+
     console.log(
-      `Generating questions using ${aiService.getProviderName()} provider`
+      `Generating questions using ${aiService.getProviderName()} provider${model ? ` with model ${model}` : ""}`
     );
 
     const questions = await aiService.generateQuestions(params);
 
     console.log(`Successfully generated ${questions.length} questions`);
 
-    return questions;
+    // If we got some questions (even if not all requested), return them
+    if (questions.length > 0) {
+      return questions;
+    }
+
+    // Only fallback to mocks if we got zero questions
+    console.warn("No questions generated, falling back to mock questions");
+    if (process.env.NODE_ENV === "development") {
+      return generateMockQuestions(params);
+    }
+
+    throw new Error(
+      `Failed to generate questions: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`
+    );
   } catch (error) {
     console.error("AI question generation error:", error);
 
-    // Fallback to mock questions in development
+    // Fallback to mock questions in development only if we got zero questions
     if (process.env.NODE_ENV === "development") {
-      console.warn("Falling back to mock questions");
+      console.warn("Falling back to mock questions due to error");
       return generateMockQuestions(params);
     }
 

@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod";
-import { ExamType, SemesterType, BloomLevel } from "@/generated/prisma";
+import { ExamType, SemesterType } from "@/generated/prisma";
 
 export const examTypeArray = Object.values(ExamType) as [
   ExamType,
@@ -219,7 +219,10 @@ export const updatePatternSchema = z.object({
  * Get Pattern by ID Schema
  */
 export const getPatternByIdSchema = z.object({
-  id: z.string().uuid("Invalid pattern ID"),
+  id: z.string().uuid("Invalid pattern ID").optional(),
+  patternId: z.string().uuid("Invalid pattern ID").optional(),
+}).refine((data) => data.id || data.patternId, {
+  message: "Either id or patternId must be provided",
 });
 
 /**

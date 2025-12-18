@@ -13,9 +13,12 @@ import {
   approvePatternSchema,
   rejectPatternSchema,
   deletePatternSchema,
+  examTypeArray,
+  semesterTypeArray,
 } from "@/validators/pattern.validators";
 import { TRPCError } from "@trpc/server";
 import type { Prisma } from "@/generated/prisma";
+import { z } from "zod";
 
 /**
  * Pattern Router
@@ -244,8 +247,16 @@ export const patternRouter = createTRPCRouter({
         });
       }
 
+      const patternId = input.id || input.patternId;
+      if (!patternId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Either id or patternId must be provided",
+        });
+      }
+
       const pattern = await prisma.questionPaperPattern.findUnique({
-        where: { id: input.id },
+        where: { id: patternId },
         include: {
           course: {
             select: {
@@ -288,7 +299,42 @@ export const patternRouter = createTRPCRouter({
         });
       }
 
-      return pattern;
+      // Calculate Part A and Part B totals from structure
+      const partAStructure = pattern.partAStructure as Array<{
+        marks: number;
+      }>;
+      const partBStructure = pattern.partBStructure as Array<{
+        hasOR: boolean;
+        options?: Array<{ questionSlot: { marks: number } }>;
+        questionSlot?: { marks: number };
+      }>;
+
+      // Calculate Part A totals
+      const partA_count = partAStructure.length;
+      const partA_marksEach =
+        partA_count > 0 ? partAStructure[0].marks : 0;
+
+      // Calculate Part B totals
+      let partB_count = 0;
+      let partB_marksEach = 0;
+      for (const group of partBStructure) {
+        if (group.hasOR && group.options && group.options.length > 0) {
+          partB_count += group.options.length;
+          partB_marksEach = group.options[0].questionSlot.marks;
+        } else if (group.questionSlot) {
+          partB_count += 1;
+          partB_marksEach = group.questionSlot.marks;
+        }
+      }
+
+      return {
+        ...pattern,
+        semester: pattern.semesterType,
+        partA_count,
+        partA_marksEach,
+        partB_count,
+        partB_marksEach,
+      };
     }),
 
   /**
@@ -635,9 +681,18 @@ export const patternRouter = createTRPCRouter({
 
   /**
    * Get approved patterns (for COE to generate papers)
+   * Returns simplified list without pagination for easier frontend use
    */
   getApprovedPatterns: controllerOfExamination
-    .input(getPatternsSchema)
+    .input(
+      z
+        .object({
+          courseId: z.string().uuid("Invalid course ID").optional(),
+          examType: z.enum(examTypeArray).optional(),
+          semesterType: z.enum(semesterTypeArray).optional(),
+        })
+        .optional()
+    )
     .query(async ({ ctx, input }) => {
       if (!ctx.session) {
         throw new TRPCError({
@@ -646,43 +701,68 @@ export const patternRouter = createTRPCRouter({
         });
       }
 
-      const { page, limit, courseId, examType, semesterType } = input;
-      const skip = (page - 1) * limit;
-
       const where: Prisma.QuestionPaperPatternWhereInput = {
         status: "APPROVED",
-        ...(courseId && { courseId }),
-        ...(examType && { examType }),
-        ...(semesterType && { semesterType }),
+        ...(input?.courseId && { courseId: input.courseId }),
+        ...(input?.examType && { examType: input.examType }),
+        ...(input?.semesterType && { semesterType: input.semesterType }),
       };
 
-      const [patterns, total] = await Promise.all([
-        prisma.questionPaperPattern.findMany({
-          where,
-          skip,
-          take: limit,
-          orderBy: {
-            createdAt: "desc",
-          },
-          include: {
-            course: {
-              select: {
-                id: true,
-                name: true,
-                course_code: true,
-              },
+      const patterns = await prisma.questionPaperPattern.findMany({
+        where,
+        orderBy: {
+          createdAt: "desc",
+        },
+        include: {
+          course: {
+            select: {
+              id: true,
+              name: true,
+              course_code: true,
             },
           },
-        }),
-        prisma.questionPaperPattern.count({ where }),
-      ]);
+        },
+      });
 
-      return {
-        patterns,
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      };
+      // Transform patterns to include calculated fields
+      const transformedPatterns = patterns.map((pattern) => {
+        const partAStructure = pattern.partAStructure as Array<{
+          marks: number;
+        }>;
+        const partBStructure = pattern.partBStructure as Array<{
+          hasOR: boolean;
+          options?: Array<{ questionSlot: { marks: number } }>;
+          questionSlot?: { marks: number };
+        }>;
+
+        // Calculate Part A totals
+        const partA_count = partAStructure.length;
+        const partA_marksEach =
+          partA_count > 0 ? partAStructure[0].marks : 0;
+
+        // Calculate Part B totals
+        let partB_count = 0;
+        let partB_marksEach = 0;
+        for (const group of partBStructure) {
+          if (group.hasOR && group.options && group.options.length > 0) {
+            partB_count += group.options.length;
+            partB_marksEach = group.options[0].questionSlot.marks;
+          } else if (group.questionSlot) {
+            partB_count += 1;
+            partB_marksEach = group.questionSlot.marks;
+          }
+        }
+
+        return {
+          ...pattern,
+          semester: pattern.semesterType,
+          partA_count,
+          partA_marksEach,
+          partB_count,
+          partB_marksEach,
+        };
+      });
+
+      return transformedPatterns;
     }),
 });

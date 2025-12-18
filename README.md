@@ -91,6 +91,11 @@ NEXTAUTH_URL=http://localhost:3000
 # Ollama AI
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=mistral:7b
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text:v1.5
+
+# ChromaDB (Vector Database)
+CHROMA_URL=http://localhost:8000
+CHROMA_COLLECTION=material_chunks
 ```
 
 ### 4. Start Database

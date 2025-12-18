@@ -45,7 +45,16 @@ export default function UploadMaterialPage() {
 
     // tRPC queries
     const { data: courses = [], isLoading: coursesLoading } = trpc.coordinator.getCoursesForMaterialUpload.useQuery();
-    const { data: materials = [], isLoading: materialsLoading, refetch: refetchMaterials } = trpc.coordinator.getUploadedMaterials.useQuery();
+    const { data: materials = [], isLoading: materialsLoading, refetch: refetchMaterials } = trpc.coordinator.getUploadedMaterials.useQuery(undefined, {
+      refetchInterval: (query) => {
+        // Auto-refresh every 1 second if any material is processing (faster updates)
+        const materialsData = query.state.data as any[] | undefined;
+        const hasProcessing = materialsData?.some(
+          (m: any) => m.parsingStatus === 'PROCESSING' || m.embeddingStatus === 'PROCESSING'
+        );
+        return hasProcessing ? 1000 : false; // 1 second for real-time feel
+      },
+    });
 
     // tRPC mutations
     const uploadMaterialMutation = trpc.coordinator.uploadCourseMaterial.useMutation({
@@ -213,34 +222,35 @@ export default function UploadMaterialPage() {
         await deleteMaterialMutation.mutateAsync({ materialId: materialToDelete.id });
     };
 
-    const getParsingStatusBadge = (status: string) => {
+    const getStatusBadge = (status: string, type: 'parsing' | 'embedding') => {
+        const label = type === 'parsing' ? 'Parsing' : 'Embedding';
         switch (status) {
             case 'PENDING':
                 return (
                     <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-200">
                         <Clock className="h-3 w-3 mr-1" />
-                        Parsing Pending
+                        {label} Pending
                     </Badge>
                 );
             case 'PROCESSING':
                 return (
                     <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
                         <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                        Parsing...
+                        {label}...
                     </Badge>
                 );
             case 'COMPLETED':
                 return (
                     <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
                         <CheckCircle2 className="h-3 w-3 mr-1" />
-                        Parsed
+                        {label} Complete
                     </Badge>
                 );
             case 'FAILED':
                 return (
                     <Badge variant="outline" className="text-xs bg-red-50 text-red-700 border-red-200">
                         <XCircle className="h-3 w-3 mr-1" />
-                        Parse Failed
+                        {label} Failed
                     </Badge>
                 );
             default:
@@ -473,67 +483,154 @@ export default function UploadMaterialPage() {
                             </div>
                         ) : (
                             <div className="space-y-3">
-                                {materials.map((material, index: number) => (
-                                    <div
-                                        key={material.id || index}
-                                        className="flex items-center justify-between p-4 border-2 rounded-lg hover:border-primary/50 hover:bg-accent/30 transition-all group"
-                                    >
-                                        <div className="flex items-center gap-4 flex-1">
-                                            <div className="rounded-lg bg-red-50 p-3 group-hover:scale-110 transition-transform">
-                                                <FileText className="h-6 w-6 text-red-500" />
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="font-semibold text-base truncate">{material.title}</p>
-                                                <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                                    <Badge variant="outline" className="text-xs">
-                                                        {material.materialType === 'SYLLABUS' ? (
-                                                            <FileText className="h-3 w-3 mr-1" />
+                                {materials.map((material: any, index: number) => {
+                                    const isProcessing = material.parsingStatus === 'PROCESSING' || material.embeddingStatus === 'PROCESSING';
+                                    const parsingProgress = material.parsingStatus === 'PROCESSING' ? undefined : material.parsingStatus === 'COMPLETED' ? 100 : 0;
+                                    
+                                    // Use real progress from backend or calculate
+                                    const embeddingProgress = material.embeddingProgress !== undefined 
+                                        ? material.embeddingProgress
+                                        : material.embeddingStatus === 'PROCESSING' 
+                                            ? (material.estimatedTotalChunks > 0 
+                                                ? Math.min(95, Math.round((material.chunkCount / material.estimatedTotalChunks) * 100))
+                                                : material.chunkCount > 0 ? 10 : 5)
+                                            : material.embeddingStatus === 'COMPLETED' ? 100 : 0;
+                                    
+                                    const totalChunks = material.estimatedTotalChunks || material.chunkCount || 0;
+                                    const currentChunks = material.chunkCount || 0;
+                                    
+                                    return (
+                                        <div
+                                            key={material.id || index}
+                                            className="flex flex-col p-4 border-2 rounded-lg hover:border-primary/50 hover:bg-accent/30 transition-all group space-y-3"
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-4 flex-1">
+                                                    <div className="rounded-lg bg-red-50 p-3 group-hover:scale-110 transition-transform">
+                                                        <FileText className="h-6 w-6 text-red-500" />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="font-semibold text-base truncate">{material.title}</p>
+                                                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                                            <Badge variant="outline" className="text-xs">
+                                                                {material.materialType === 'SYLLABUS' ? (
+                                                                    <FileText className="h-3 w-3 mr-1" />
+                                                                ) : (
+                                                                    <BookOpen className="h-3 w-3 mr-1" />
+                                                                )}
+                                                                {material.materialType === 'SYLLABUS' ? 'Syllabus' : `Unit ${material.unit}`}
+                                                            </Badge>
+                                                            <Badge variant="secondary" className="text-xs">
+                                                                {material.course?.course_code || 'Unknown Course'}
+                                                            </Badge>
+                                                            <span className="text-xs text-muted-foreground">
+                                                                {new Date(material.uploadedAt).toLocaleDateString('en-US', {
+                                                                    month: 'short',
+                                                                    day: 'numeric',
+                                                                    year: 'numeric',
+                                                                })}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="text-muted-foreground hover:text-primary"
+                                                        onClick={() => handleDownloadMaterial(material.filePath, material.title)}
+                                                        title="Download"
+                                                    >
+                                                        <Download className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="text-muted-foreground hover:text-destructive"
+                                                        onClick={() => handleDeleteClick({ id: material.id, title: material.title })}
+                                                        disabled={deleteMaterialMutation.isPending}
+                                                        title="Delete"
+                                                    >
+                                                        {deleteMaterialMutation.isPending && materialToDelete?.id === material.id ? (
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
                                                         ) : (
-                                                            <BookOpen className="h-3 w-3 mr-1" />
+                                                            <Trash2 className="h-4 w-4" />
                                                         )}
-                                                        {material.materialType === 'SYLLABUS' ? 'Syllabus' : `Unit ${material.unit}`}
-                                                    </Badge>
-                                                    <Badge variant="secondary" className="text-xs">
-                                                        {material.course?.course_code || 'Unknown Course'}
-                                                    </Badge>
-                                                    {getParsingStatusBadge(material.parsingStatus)}
-                                                    <span className="text-xs text-muted-foreground">
-                                                        {new Date(material.uploadedAt).toLocaleDateString('en-US', {
-                                                            month: 'short',
-                                                            day: 'numeric',
-                                                            year: 'numeric',
-                                                        })}
-                                                    </span>
+                                                    </Button>
                                                 </div>
                                             </div>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="text-muted-foreground hover:text-primary"
-                                                onClick={() => handleDownloadMaterial(material.filePath, material.title)}
-                                                title="Download"
-                                            >
-                                                <Download className="h-4 w-4" />
-                                            </Button>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="text-muted-foreground hover:text-destructive"
-                                                onClick={() => handleDeleteClick({ id: material.id, title: material.title })}
-                                                disabled={deleteMaterialMutation.isPending}
-                                                title="Delete"
-                                            >
-                                                {deleteMaterialMutation.isPending && materialToDelete?.id === material.id ? (
-                                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                                ) : (
-                                                    <Trash2 className="h-4 w-4" />
+                                            
+                                            {/* Progress Section */}
+                                            <div className="space-y-2 pt-2 border-t">
+                                                {/* Parsing Status */}
+                                                <div className="space-y-1">
+                                                    <div className="flex items-center justify-between text-xs">
+                                                        <span className="text-muted-foreground">PDF Parsing</span>
+                                                        {getStatusBadge(material.parsingStatus, 'parsing')}
+                                                    </div>
+                                                    {material.parsingStatus === 'PROCESSING' && (
+                                                        <Progress value={undefined} className="h-1.5" />
+                                                    )}
+                                                    {material.parsingStatus === 'COMPLETED' && (
+                                                        <Progress value={100} className="h-1.5" />
+                                                    )}
+                                                    {material.parsingError && (
+                                                        <p className="text-xs text-destructive mt-1">{material.parsingError}</p>
+                                                    )}
+                                                </div>
+                                                
+                                                {/* Embedding Status */}
+                                                {material.parsingStatus === 'COMPLETED' && (
+                                                    <div className="space-y-1">
+                                                        <div className="flex items-center justify-between text-xs">
+                                                            <span className="text-muted-foreground">
+                                                                Embedding {
+                                                                    material.embeddingStatus === 'PROCESSING' 
+                                                                        ? (totalChunks > 0 && currentChunks > 0
+                                                                            ? `${currentChunks}/${totalChunks} chunks (${embeddingProgress}%)`
+                                                                            : totalChunks > 0
+                                                                                ? `Starting... (0/${totalChunks} chunks)`
+                                                                                : currentChunks > 0
+                                                                                    ? `(${currentChunks} chunks processed)`
+                                                                                    : 'Initializing...')
+                                                                        : material.embeddingStatus === 'COMPLETED'
+                                                                            ? (material.chunkCount && material.chunkCount > 0 
+                                                                                ? `(${material.chunkCount} chunks)`
+                                                                                : material.chunkCount === 0
+                                                                                    ? '(No chunks)'
+                                                                                    : '(Processing...)')
+                                                                            : material.chunkCount && material.chunkCount > 0 
+                                                                                ? `(${material.chunkCount} chunks)`
+                                                                                : ''
+                                                                }
+                                                            </span>
+                                                            {getStatusBadge(material.embeddingStatus || 'PENDING', 'embedding')}
+                                                        </div>
+                                                        {material.embeddingStatus === 'PROCESSING' && (
+                                                            <div className="space-y-1">
+                                                                <Progress value={embeddingProgress > 0 ? embeddingProgress : 5} className="h-2" />
+                                                                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                                                    <span>
+                                                                        {totalChunks > 0 && currentChunks > 0
+                                                                            ? `Processing chunk ${currentChunks} of ${totalChunks}...`
+                                                                            : 'Preparing chunks...'}
+                                                                    </span>
+                                                                    <span>{embeddingProgress > 0 ? `${embeddingProgress}%` : '0%'}</span>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {material.embeddingStatus === 'COMPLETED' && (
+                                                            <Progress value={100} className="h-1.5" />
+                                                        )}
+                                                        {material.embeddingError && (
+                                                            <p className="text-xs text-destructive mt-1">{material.embeddingError}</p>
+                                                        )}
+                                                    </div>
                                                 )}
-                                            </Button>
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </CardContent>

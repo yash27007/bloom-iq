@@ -230,14 +230,38 @@ export default function ReviewQuestionsPage() {
 
         const { courseId, materialId, unit } = JSON.parse(metadata);
 
-        const questionsToSave = questions.map(q => ({
-            question: q.question,
-            answer: q.answer,
-            difficultyLevel: q.difficultyLevel,
-            bloomLevel: q.bloomLevel,
-            generationType: q.generationType,
-            marks: q.marks,
-        }));
+        // Normalize and validate questions before saving
+        const questionsToSave = questions.map((q, index) => {
+            // Normalize difficultyLevel - ensure it's EASY, MEDIUM, or HARD
+            let difficultyLevel = q.difficultyLevel?.toUpperCase();
+            if (!["EASY", "MEDIUM", "HARD"].includes(difficultyLevel || "")) {
+                // Derive from marks if difficulty is invalid
+                if (q.marks === "TWO") {
+                    difficultyLevel = "EASY";
+                } else if (q.marks === "EIGHT") {
+                    difficultyLevel = "MEDIUM";
+                } else if (q.marks === "SIXTEEN") {
+                    difficultyLevel = "HARD";
+                } else {
+                    difficultyLevel = "MEDIUM"; // Default fallback
+                }
+                console.warn(`[Review Questions] Question ${index + 1} has invalid difficultyLevel: ${q.difficultyLevel}, using ${difficultyLevel}`);
+            }
+
+            // Normalize other fields
+            const bloomLevel = q.bloomLevel?.toUpperCase() || "UNDERSTAND";
+            const generationType = q.generationType?.toUpperCase() || "DIRECT";
+            const marks = q.marks?.toUpperCase() || "TWO";
+
+            return {
+                question: q.question?.trim() || "",
+                answer: q.answer?.trim() || "",
+                difficultyLevel: difficultyLevel as "EASY" | "MEDIUM" | "HARD",
+                bloomLevel: bloomLevel as "REMEMBER" | "UNDERSTAND" | "APPLY" | "ANALYZE" | "EVALUATE" | "CREATE",
+                generationType: generationType as "DIRECT" | "INDIRECT" | "SCENARIO_BASED" | "PROBLEM_BASED",
+                marks: marks as "TWO" | "EIGHT" | "SIXTEEN",
+            };
+        });
 
         console.log('[DEBUG] Saving questions:', questionsToSave);
         console.log('[DEBUG] First question marks:', questionsToSave[0]?.marks, typeof questionsToSave[0]?.marks);

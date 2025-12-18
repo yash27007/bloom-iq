@@ -6,6 +6,7 @@
  */
 
 import { chunkContent } from "@/lib/content-chunker";
+import { logger } from "@/lib/logger";
 
 export interface EmbeddingResult {
   embedding: number[];
@@ -57,32 +58,55 @@ export class EmbeddingService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
+        const error = new Error(
           `Ollama embedding API error: ${response.status} - ${errorText}`
         );
+        logger.error(
+          "EmbeddingService",
+          "Failed to generate embedding",
+          error,
+          {
+            status: response.status,
+            model: this.model,
+          }
+        );
+        throw error;
       }
 
       const data = await response.json();
 
       if (!data.embedding || !Array.isArray(data.embedding)) {
-        throw new Error("Invalid embedding response format");
+        const error = new Error("Invalid embedding response format");
+        logger.error("EmbeddingService", "Invalid embedding response", error);
+        throw error;
       }
 
       // Estimate token count (rough: 1 token ≈ 4 characters)
       const tokenCount = Math.ceil(text.length / 4);
+
+      logger.debug("EmbeddingService", "Generated embedding", {
+        embeddingLength: data.embedding.length,
+        tokenCount,
+        textLength: text.length,
+      });
 
       return {
         embedding: data.embedding,
         tokenCount,
       };
     } catch (error) {
-      console.error("[Embedding Service] Failed to generate embedding:", error);
+      logger.error(
+        "EmbeddingService",
+        "Failed to generate embedding",
+        error instanceof Error ? error : new Error(String(error))
+      );
       throw error;
     }
   }
 
   /**
    * Chunk content and generate embeddings for all chunks
+   * @param onProgress Optional callback to report progress (current, total)
    */
   async chunkAndEmbed(
     content: string,
@@ -90,10 +114,17 @@ export class EmbeddingService {
     options?: {
       maxTokensPerChunk?: number;
       minTokensPerChunk?: number;
+      onProgress?: (current: number, total: number) => void;
     }
   ): Promise<ChunkWithEmbedding[]> {
-    console.log(`[Embedding] Starting chunking and embedding for unit ${unit}`);
-    console.log(`[Embedding] Content length: ${content.length} characters`);
+    logger.info(
+      "EmbeddingService",
+      `Starting chunking and embedding for unit ${unit}`,
+      {
+        unit,
+        contentLength: content.length,
+      }
+    );
 
     // Chunk the content
     const chunks = await chunkContent(content, {
@@ -103,52 +134,107 @@ export class EmbeddingService {
       preserveContext: true,
     });
 
-    console.log(`[Embedding] Created ${chunks.length} chunks`);
+    logger.info("EmbeddingService", `Created ${chunks.length} chunks`, {
+      unit,
+      chunkCount: chunks.length,
+    });
 
-    // Generate embeddings for each chunk
+    // Generate embeddings in parallel batches to improve performance
+    // Process 3 chunks at a time to avoid overwhelming the GPU
+    const BATCH_SIZE = 3;
     const chunksWithEmbeddings: ChunkWithEmbedding[] = [];
 
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      console.log(
-        `[Embedding] Processing chunk ${i + 1}/${chunks.length}: "${
-          chunk.title
-        }"`
-      );
+    for (
+      let batchStart = 0;
+      batchStart < chunks.length;
+      batchStart += BATCH_SIZE
+    ) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, chunks.length);
+      const batch = chunks.slice(batchStart, batchEnd);
 
-      try {
-        const embeddingResult = await this.generateEmbedding(chunk.content);
+      // Process batch in parallel
+      const batchPromises = batch.map(async (chunk, batchIndex) => {
+        const i = batchStart + batchIndex;
 
-        chunksWithEmbeddings.push({
-          chunkIndex: i,
-          title: chunk.title,
-          content: chunk.content,
-          embedding: embeddingResult.embedding,
-          tokenCount: embeddingResult.tokenCount,
-          metadata: chunk.metadata,
-        });
+        logger.debug(
+          "EmbeddingService",
+          `Processing chunk ${i + 1}/${chunks.length}`,
+          {
+            chunkIndex: i,
+            chunkTitle: chunk.title,
+            unit,
+          }
+        );
 
-        // Small delay to prevent overwhelming the GPU
-        if (i < chunks.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
+        // Report progress
+        if (options?.onProgress) {
+          options.onProgress(i + 1, chunks.length);
         }
-      } catch (error) {
-        console.error(`[Embedding] Failed to embed chunk ${i + 1}:`, error);
-        // Continue with other chunks even if one fails
-        // We'll still store the chunk without embedding
+
+        try {
+          const embeddingResult = await this.generateEmbedding(chunk.content);
+
+          return {
+            chunkIndex: i,
+            title: chunk.title,
+            content: chunk.content,
+            embedding: embeddingResult.embedding,
+            tokenCount: embeddingResult.tokenCount,
+            metadata: chunk.metadata,
+            success: true,
+          };
+        } catch (error) {
+          logger.error(
+            "EmbeddingService",
+            `Failed to embed chunk ${i + 1}`,
+            error instanceof Error ? error : new Error(String(error)),
+            {
+              unit,
+              chunkIndex: i,
+              chunkTitle: chunk.title,
+            }
+          );
+          // Return chunk without embedding
+          return {
+            chunkIndex: i,
+            title: chunk.title,
+            content: chunk.content,
+            embedding: [] as number[], // Empty embedding - will be regenerated later
+            tokenCount: chunk.tokens,
+            metadata: chunk.metadata,
+            success: false,
+          };
+        }
+      });
+
+      // Wait for batch to complete
+      const batchResults = await Promise.all(batchPromises);
+
+      // Add successful chunks to results
+      for (const result of batchResults) {
         chunksWithEmbeddings.push({
-          chunkIndex: i,
-          title: chunk.title,
-          content: chunk.content,
-          embedding: [], // Empty embedding - will be regenerated later
-          tokenCount: chunk.tokens,
-          metadata: chunk.metadata,
+          chunkIndex: result.chunkIndex,
+          title: result.title,
+          content: result.content,
+          embedding: result.embedding,
+          tokenCount: result.tokenCount,
+          metadata: result.metadata,
         });
+      }
+
+      // Small delay between batches to prevent overwhelming the GPU
+      if (batchEnd < chunks.length) {
+        await new Promise((resolve) => setTimeout(resolve, 50)); // Reduced from 100ms
       }
     }
 
-    console.log(
-      `[Embedding] Successfully embedded ${chunksWithEmbeddings.length} chunks`
+    logger.info(
+      "EmbeddingService",
+      `Successfully embedded ${chunksWithEmbeddings.length} chunks`,
+      {
+        unit,
+        totalChunks: chunksWithEmbeddings.length,
+      }
     );
     return chunksWithEmbeddings;
   }

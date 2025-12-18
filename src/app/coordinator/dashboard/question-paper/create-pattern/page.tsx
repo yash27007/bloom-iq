@@ -21,7 +21,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Separator } from "@/components/ui/separator";
 import { Loader2, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -30,7 +29,6 @@ import type {
   PartBQuestionGroup,
   PartBQuestionSlot,
   SubQuestion,
-  OROption,
   ExamType,
   SemesterType,
   BloomLevel,

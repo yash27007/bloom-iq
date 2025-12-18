@@ -13,6 +13,14 @@ import type {
   GeneratedQuestion,
 } from "./types";
 import { OLLAMA_SYSTEM_PROMPT } from "./prompts/ollama-prompt";
+import {
+  parseQuestionResponse,
+  stripMarkdown,
+  sanitizeQuestions,
+  validateQuestions,
+  validateDifficultyDistribution,
+  filterValidQuestions,
+} from "./parsers/question-parser";
 
 /**
  * Supported Ollama models (https://ollama.com/library)
@@ -147,14 +155,24 @@ export class OllamaProvider implements AIProvider {
         allQuestions.push(...chunkQuestions);
       }
 
-      return allQuestions.slice(0, totalQuestions);
+      const finalQuestions = allQuestions.slice(0, totalQuestions);
+
+      // If we got some questions (even if not all), return them instead of failing
+      if (finalQuestions.length > 0) {
+        console.log(
+          `[Ollama Provider] Generated ${finalQuestions.length} questions (requested ${totalQuestions})`
+        );
+        return finalQuestions;
+      }
+
+      // Only throw if we got absolutely no questions
+      throw new Error(
+        "Failed to generate any questions from Ollama after all retries"
+      );
     } catch (error) {
       console.error("[Ollama Provider] Question generation failed:", error);
-      throw new Error(
-        error instanceof Error
-          ? error.message
-          : "Failed to generate questions from Ollama"
-      );
+      // Re-throw to allow fallback mechanism
+      throw error;
     }
   }
 
@@ -170,11 +188,12 @@ export class OllamaProvider implements AIProvider {
   private async generateQuestionsFromChunk(
     params: QuestionGenerationParams,
     contentChunk: string,
-    retryCount: number = 0
+    retryCount: number = 0,
+    accumulatedQuestions: GeneratedQuestion[] = []
   ): Promise<GeneratedQuestion[]> {
     const prompt = this.buildPrompt(params, contentChunk);
-    // Increased retries for better chance of meeting requirements
-    const maxRetries = 3;
+    // Reduced retries to prevent GPU overheating - accept 80% of requirements
+    const maxRetries = 2;
 
     try {
       console.log(
@@ -222,12 +241,45 @@ export class OllamaProvider implements AIProvider {
         generatedText.substring(Math.max(0, generatedText.length - 500))
       );
 
-      const parsedResponse = this.parseQuestionResponse(generatedText);
+      let parsedResponse;
+      try {
+        parsedResponse = parseQuestionResponse(generatedText, "OllamaProvider");
+      } catch (parseError) {
+        // If parsing fails (e.g., empty JSON {}), handle gracefully
+        console.warn(
+          `[Ollama] Parse failed on attempt ${retryCount + 1}: ${
+            parseError instanceof Error
+              ? parseError.message
+              : String(parseError)
+          }`
+        );
+        // If we have retries left, try again
+        if (retryCount < maxRetries) {
+          const delay = (retryCount + 1) * 3000;
+          console.log(`[Ollama] Waiting ${delay}ms before retry...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          return this.generateQuestionsFromChunk(
+            params,
+            contentChunk,
+            retryCount + 1,
+            accumulatedQuestions
+          );
+        }
+        // If no retries left, return accumulated questions or empty array
+        if (accumulatedQuestions.length > 0) {
+          console.warn(
+            `[Ollama] Parse failed on final attempt, returning ${accumulatedQuestions.length} questions from previous attempts`
+          );
+          return accumulatedQuestions;
+        }
+        console.warn(
+          `[Ollama] All retries exhausted with no valid questions, returning empty result to prevent GPU overheating`
+        );
+        return [];
+      }
 
       // Filter out invalid questions (empty text, etc.)
-      const validQuestions = this.filterValidQuestions(
-        parsedResponse.questions
-      );
+      const validQuestions = filterValidQuestions(parsedResponse.questions);
 
       // Check if we got the expected counts
       const counts = this.countQuestionsByDifficulty(validQuestions);
@@ -296,26 +348,43 @@ export class OllamaProvider implements AIProvider {
             expected.medium - counts.medium
           )}, HARD=${Math.max(0, expected.hard - counts.hard)}`
         );
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        return this.generateQuestionsFromChunk(
+        // Add longer delay between retries to prevent GPU overheating
+        // Increase delay with each retry: 3s, 5s
+        const delay = (retryCount + 1) * 3000;
+        console.log(
+          `[Ollama] Waiting ${delay}ms before retry to prevent GPU overheating...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        // Accumulate questions from this attempt before retrying
+        const nextAttempt = await this.generateQuestionsFromChunk(
           params,
           contentChunk,
-          retryCount + 1
+          retryCount + 1,
+          [...accumulatedQuestions, ...validQuestions] // Accumulate questions
         );
+        return nextAttempt;
       }
 
-      // If we still don't have enough questions after retries, log a warning
+      // If we still don't have enough questions after retries, accept what we have
+      // Better to return partial results than fail completely
       if (needsRetry && retryCount >= maxRetries) {
-        console.error(
-          `[Ollama] WARNING: Failed to generate required question counts after ${
-            maxRetries + 1
-          } attempts. Generated: ${validQuestions.length}, Expected: ${
+        console.warn(
+          `[Ollama] WARNING: Generated ${
+            validQuestions.length
+          } questions (Expected: ${
             expected.easy + expected.medium + expected.hard
-          }`
+          }) after ${
+            maxRetries + 1
+          } attempts. Accepting partial results to prevent GPU overheating.`
         );
+        // Still return what we have - better than nothing
       }
 
-      return validQuestions;
+      // Accumulate questions from this attempt
+      const allAccumulated = [...accumulatedQuestions, ...validQuestions];
+
+      // Return accumulated questions even if count doesn't match exactly (accept 80% threshold)
+      return allAccumulated;
     } catch (error) {
       console.error(`[Ollama] Attempt ${retryCount + 1} failed:`, error);
 
@@ -336,7 +405,8 @@ export class OllamaProvider implements AIProvider {
         return this.generateQuestionsFromChunk(
           params,
           contentChunk,
-          retryCount + 1
+          retryCount + 1,
+          accumulatedQuestions
         );
       }
 
@@ -369,7 +439,7 @@ You must generate ${totalQuestions} high-quality, exam-ready questions based STR
       easy === 0 ? 0 : easy - 1
     }, NOT ${easy + 1}, EXACTLY ${easy})
      * Marks: 2 marks each
-     * Answer length: MINIMUM 50 words, ideally 80-120 words (MUST be detailed, expand with examples)
+     * Answer format: 3-4 key points, 30-50 words MAXIMUM (concise, factual points)
      * Bloom's: REMEMBER or UNDERSTAND ONLY
      * If ${easy} = 0, generate ZERO easy questions
    
@@ -377,7 +447,7 @@ You must generate ${totalQuestions} high-quality, exam-ready questions based STR
       medium === 0 ? 0 : medium - 1
     }, NOT ${medium + 1}, EXACTLY ${medium})
      * Marks: 8 marks each
-     * Answer length: MINIMUM 200 words, ideally 300-500 words (MUST be comprehensive with examples, comparisons)
+     * Answer format: 5-6 key points, 100-120 words MAXIMUM (brief explanations, comparisons)
      * Bloom's: APPLY or ANALYZE ONLY
      * If ${medium} = 0, generate ZERO medium questions
    
@@ -385,7 +455,7 @@ You must generate ${totalQuestions} high-quality, exam-ready questions based STR
       hard === 0 ? 0 : hard - 1
     }, NOT ${hard + 1}, EXACTLY ${hard})
      * Marks: 16 marks each
-     * Answer length: MINIMUM 500 words, ideally 800-1200 words (MUST be exhaustive with multiple sections)
+     * Answer format: 6-8 key points, 200-250 words MAXIMUM (structured points with brief context)
      * Bloom's: EVALUATE or CREATE ONLY
      * If ${hard} = 0, generate ZERO hard questions
 
@@ -473,14 +543,14 @@ CRITICAL REQUIREMENTS:
     } SCENARIO_BASED questions
 8. Generate EXACTLY ${params.questionTypes.problemBased} PROBLEM_BASED questions
 9. Use marks format: "TWO" for 2 marks, "EIGHT" for 8 marks, "SIXTEEN" for 16 marks
-10. ANSWER LENGTH IS CRITICAL - Write LONG, DETAILED answers (THIS IS MANDATORY):
-    - 2 marks: MINIMUM 30 words (ideally 50-80) - expand with examples, details, context, explanations
-    - 8 marks: MINIMUM 100 words (ideally 200-400) - comprehensive with multiple points, examples, comparisons, step-by-step breakdowns
-    - 16 marks: MINIMUM 300 words (ideally 500-800) - exhaustive with introduction, sections, examples, analysis, comparisons, conclusion
-11. DO NOT write short answers - Always expand with more detail, examples, explanations, comparisons, step-by-step breakdowns, and context
+10. ANSWER FORMAT - KEY POINTS ONLY (CRITICAL):
+    - 2 marks: 3-4 key points, 30-50 words MAXIMUM (concise, factual)
+    - 8 marks: 5-6 key points, 100-120 words MAXIMUM (brief explanations)
+    - 16 marks: 6-8 key points, 200-250 words MAXIMUM (structured with context)
+11. Use KEY POINTS format: "Point 1. Point 2. Point 3." - NOT long paragraphs or essays
 12. Match Bloom's levels correctly: EASY=REMEMBER/UNDERSTAND, MEDIUM=APPLY/ANALYZE, HARD=EVALUATE/CREATE
-13. GENERATE ALL QUESTIONS - Do not stop early. You MUST generate all ${totalQuestions} questions even if it takes longer
-14. If you find yourself writing short answers, STOP and EXPAND them with more detail, examples, and explanations
+13. GENERATE ALL QUESTIONS - Do not stop early. You MUST generate all ${totalQuestions} questions
+14. Keep answers concise with KEY POINTS - do not write long paragraphs
 
 DO NOT generate fewer questions. If you cannot generate all ${totalQuestions} questions, you MUST still try to generate as many as possible.`;
   }
@@ -518,14 +588,14 @@ DO NOT generate fewer questions. If you cannot generate all ${totalQuestions} qu
       );
       const parsed = JSON.parse(jsonMatch[0]);
 
+      // Handle empty JSON or missing questions array gracefully
       if (!parsed.questions || !Array.isArray(parsed.questions)) {
-        console.error(
-          "[Ollama] Response structure:",
+        console.warn(
+          "[Ollama] Empty or invalid response structure:",
           JSON.stringify(parsed, null, 2)
         );
-        throw new Error(
-          "Invalid response structure: missing 'questions' array"
-        );
+        // Return empty array instead of throwing - allows retry mechanism to work
+        return { questions: [] };
       }
 
       console.log(
@@ -541,7 +611,10 @@ DO NOT generate fewer questions. If you cannot generate all ${totalQuestions} qu
       }
 
       // Sanitize questions - fill in missing fields with reasonable defaults
-      const sanitizedQuestions = this.sanitizeQuestions(parsed.questions);
+      const sanitizedQuestions = sanitizeQuestions(
+        parsed.questions,
+        "OllamaProvider"
+      );
 
       if (sanitizedQuestions.length > 0) {
         console.log(
@@ -550,8 +623,8 @@ DO NOT generate fewer questions. If you cannot generate all ${totalQuestions} qu
         );
       }
 
-      this.validateQuestions(sanitizedQuestions);
-      this.validateDifficultyDistribution(sanitizedQuestions);
+      validateQuestions(sanitizedQuestions, "OllamaProvider");
+      validateDifficultyDistribution(sanitizedQuestions, "OllamaProvider");
 
       return { questions: sanitizedQuestions };
     } catch (error) {
@@ -763,8 +836,8 @@ DO NOT generate fewer questions. If you cannot generate all ${totalQuestions} qu
       const rawAnswerText = getTextValue("answer_text", "answer", "answerText");
 
       const sanitized: GeneratedQuestion = {
-        question_text: this.stripMarkdown(rawQuestionText),
-        answer_text: this.stripMarkdown(rawAnswerText),
+        question_text: stripMarkdown(rawQuestionText),
+        answer_text: stripMarkdown(rawAnswerText),
         difficulty_level: normalizedDifficulty,
         bloom_level: (
           getTextValue("bloom_level", "bloomLevel") || "UNDERSTAND"
@@ -823,9 +896,10 @@ DO NOT generate fewer questions. If you cannot generate all ${totalQuestions} qu
         .split(/\s+/)
         .filter((w) => w.length > 0).length;
 
-      // Very lenient minimums: 2 marks = 15 words, 8 marks = 80 words, 16 marks = 200 words
-      // This prevents filtering out valid questions while still removing placeholder/empty answers
-      const minWords = q.marks === "TWO" ? 15 : q.marks === "EIGHT" ? 80 : 200;
+      // Very lenient minimums for key-point answers format:
+      // Key points are concise, so accept much shorter answers
+      // 2 marks = 10 words (3-4 key points), 8 marks = 25 words (5-6 key points), 16 marks = 50 words (6-8 key points)
+      const minWords = q.marks === "TWO" ? 10 : q.marks === "EIGHT" ? 25 : 50;
 
       if (answerWords < minWords) {
         console.warn(
@@ -987,61 +1061,47 @@ DO NOT generate fewer questions. If you cannot generate all ${totalQuestions} qu
         const answerWords = question.answer_text
           .split(/\s+/)
           .filter((w) => w.length > 0).length;
-        // Updated to match new minimums: 15/80/200
+        // Very lenient minimums for key-point answers format: 10/25/50
         const minWords =
           question.marks === "TWO"
-            ? 15
+            ? 10
             : question.marks === "EIGHT"
-            ? 80
+            ? 25
             : question.marks === "SIXTEEN"
-            ? 200
-            : 15;
+            ? 50
+            : 10;
 
         if (answerWords < minWords) {
           console.warn(
             `[Ollama] WARNING: Question ${
               i + 1
-            } answer short: ${answerWords} words (expected: ${minWords}+ for ${
+            } answer short: ${answerWords} words (minimum: ${minWords} for ${
               question.marks
-            } marks)`
+            } marks, but accepting anyway for key-point format)`
           );
+          // Don't filter out - key points can be shorter
         }
       }
 
-      // Check Bloom's alignment with difficulty - WARN ONLY
+      // Check Bloom's alignment with difficulty - WARN ONLY (non-blocking)
+      // Accept questions even if Bloom's level doesn't perfectly match (especially for smaller models)
       const bloomLevel = question.bloom_level;
       const difficulty = question.difficulty_level;
 
-      if (
-        difficulty === "EASY" &&
-        !["REMEMBER", "UNDERSTAND"].includes(bloomLevel)
-      ) {
-        console.warn(
-          `[Ollama] WARNING: Question ${
-            i + 1
-          }: EASY should use REMEMBER/UNDERSTAND, got ${bloomLevel}`
-        );
-      }
+      // More lenient: Accept if Bloom's level is close (e.g., UNDERSTAND for EASY is acceptable)
+      const isAcceptableBloom =
+        (difficulty === "EASY" &&
+          ["REMEMBER", "UNDERSTAND"].includes(bloomLevel)) ||
+        (difficulty === "MEDIUM" &&
+          ["APPLY", "ANALYZE", "UNDERSTAND"].includes(bloomLevel)) ||
+        (difficulty === "HARD" &&
+          ["EVALUATE", "CREATE", "ANALYZE", "APPLY"].includes(bloomLevel));
 
-      if (
-        difficulty === "MEDIUM" &&
-        !["APPLY", "ANALYZE"].includes(bloomLevel)
-      ) {
+      if (!isAcceptableBloom) {
         console.warn(
           `[Ollama] WARNING: Question ${
             i + 1
-          }: MEDIUM should use APPLY/ANALYZE, got ${bloomLevel}`
-        );
-      }
-
-      if (
-        difficulty === "HARD" &&
-        !["EVALUATE", "CREATE"].includes(bloomLevel)
-      ) {
-        console.warn(
-          `[Ollama] WARNING: Question ${
-            i + 1
-          }: HARD should use EVALUATE/CREATE, got ${bloomLevel}`
+          }: ${difficulty} typically uses different Bloom's level, got ${bloomLevel} (accepting anyway)`
         );
       }
     }

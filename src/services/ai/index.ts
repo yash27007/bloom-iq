@@ -7,16 +7,17 @@
 
 import type { AIProvider } from "./types";
 import { OllamaProvider } from "./ollama-provider";
+import { GeminiProvider } from "./gemini-provider";
 
 /**
  * Available AI providers
  */
 export enum AIProviderType {
   OLLAMA = "ollama",
+  GEMINI = "gemini",
   // Future providers can be added here:
   // OPENAI = "openai",
   // ANTHROPIC = "anthropic",
-  // GEMINI = "gemini",
 }
 
 /**
@@ -29,6 +30,8 @@ export function getAIProvider(): AIProvider {
   switch (providerType) {
     case AIProviderType.OLLAMA:
       return new OllamaProvider();
+    case AIProviderType.GEMINI:
+      return new GeminiProvider();
     // Future providers:
     // case AIProviderType.OPENAI:
     //   return new OpenAIProvider();
@@ -48,3 +51,4 @@ export const aiService = getAIProvider();
 // Re-export types for convenience
 export * from "./types";
 export { OllamaProvider, OLLAMA_MODELS } from "./ollama-provider";
+export { GeminiProvider, GEMINI_MODELS } from "./gemini-provider";

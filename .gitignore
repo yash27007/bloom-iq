@@ -53,3 +53,8 @@ bloom.json
 
 #Google cloud credentials
 credentials.json
+
+# Logs
+/logs/
+logs/
+*.log
