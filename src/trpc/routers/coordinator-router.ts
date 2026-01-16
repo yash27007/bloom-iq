@@ -7,7 +7,12 @@ import { parsePDFToText } from "@/lib/pdf-parser";
 import { readFile, unlink } from "fs/promises";
 import { join } from "path";
 import { logger } from "@/lib/logger";
-import { aiService, AIProviderType } from "@/services/ai";
+import {
+  AIProviderType,
+  generateAIText,
+  getProviderType,
+  listAvailableModels,
+} from "@/services/ai";
 
 // NOTE: parsePDFInBackground has been moved to MaterialService
 // This old function is kept for reference but should not be used
@@ -104,54 +109,12 @@ async function generateChatResponse(
   prompt: string,
   model?: string
 ): Promise<string> {
-  const providerType = (process.env.AI_PROVIDER as AIProviderType) || AIProviderType.OLLAMA;
-  const apiKey = process.env.GEMINI_API_KEY || "";
-  const ollamaUrl = process.env.OLLAMA_URL || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-  const defaultModel = model || process.env.DEFAULT_AI_MODEL || (providerType === AIProviderType.GEMINI ? "gemini-2.5-flash" : "gemma3:4b");
-
-  if (providerType === AIProviderType.GEMINI && apiKey) {
-    // Use Gemini SDK
-    const { GoogleGenAI } = await import("@google/genai");
-    const ai = new GoogleGenAI({ apiKey });
-    
-    const response = await ai.models.generateContent({
-      model: defaultModel,
-      contents: prompt,
-      config: {
-        temperature: 0.7,
-        topP: 0.9,
-        maxOutputTokens: 1000,
-      },
-    });
-
-    return response.text || "";
-  } else {
-    // Use Ollama API (fallback or default)
-    const response = await fetch(`${ollamaUrl}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: defaultModel,
-        prompt,
-        stream: false,
-        options: {
-          temperature: 0.7,
-          top_p: 0.9,
-          num_predict: 1000,
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `Ollama API error: ${response.status} ${response.statusText} - ${errorText}`
-      );
-    }
-
-    const data = await response.json();
-    return data.response || "";
-  }
+  return generateAIText(prompt, {
+    model,
+    temperature: 0.7,
+    topP: 0.9,
+    maxTokens: 1000,
+  });
 }
 
 /**
@@ -191,73 +154,11 @@ Respond with ONLY this JSON format (no other text):
 }`;
 
   try {
-    const providerType = (process.env.AI_PROVIDER as AIProviderType) || AIProviderType.OLLAMA;
-    const apiKey = process.env.GEMINI_API_KEY || "";
-    const geminiBaseUrl = "https://generativelanguage.googleapis.com/v1beta/openai";
-    const ollamaUrl = process.env.OLLAMA_URL || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-    const defaultModel = model || process.env.DEFAULT_AI_MODEL || (providerType === AIProviderType.GEMINI ? "gemini-2.5-flash" : "gemma3:4b");
-
-    let responseText: string;
-    
-    if (providerType === AIProviderType.GEMINI && apiKey) {
-      // Use Gemini SDK
-      const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({ apiKey });
-      
-      const result = await ai.models.generateContent({
-        model: defaultModel,
-        contents: decisionPrompt,
-        config: {
-          temperature: 0.2,
-          maxOutputTokens: 200,
-        },
-      });
-      
-      responseText = result.text || "";
-    } else {
-      // Use Ollama API
-      const response = await fetch(`${ollamaUrl}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: defaultModel,
-          prompt: decisionPrompt,
-          stream: false,
-          options: {
-            temperature: 0.3,
-            num_predict: 200,
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        logger.warn(
-          "CoordinatorRouter",
-          "Function calling decision failed, using fallback",
-          {
-            status: response.status,
-          }
-        );
-        return { name: "none" };
-      }
-
-      const data = await response.json();
-      responseText = data.response || "";
-    }
-
-    if (!response.ok) {
-      // Fallback to simple heuristic if function calling fails
-      logger.warn(
-        "CoordinatorRouter",
-        "Function calling decision failed, using fallback",
-        {
-          status: response.status,
-        }
-      );
-      return { name: "none" };
-    }
-
-    // responseText is already set above based on provider type
+    const responseText = await generateAIText(decisionPrompt, {
+      model,
+      temperature: 0.2,
+      maxTokens: 200,
+    });
 
     // Try to extract JSON from response
     let functionCall: FunctionCall;
@@ -393,71 +294,16 @@ export const coordinatorRouter = createTRPCRouter({
   // Get available AI models (supports both Ollama and Gemini)
   getOllamaModels: coordinatorProcedure.query(async () => {
     try {
-      const providerType = (process.env.AI_PROVIDER as AIProviderType) || AIProviderType.OLLAMA;
-      const apiKey = process.env.GEMINI_API_KEY || "";
+      const providerType =
+        (process.env.AI_PROVIDER as AIProviderType) || AIProviderType.OLLAMA;
+      const models = await listAvailableModels();
 
-      if (providerType === AIProviderType.GEMINI && apiKey) {
-        // Return default Gemini models (SDK doesn't have a direct list method)
-        const geminiModels = [
-          { name: "gemini-2.5-flash", model: "gemini-2.5-flash" },
-          { name: "gemini-2.5-pro", model: "gemini-2.5-pro" },
-          { name: "gemini-2.0-flash", model: "gemini-2.0-flash" },
-          { name: "gemini-1.5-pro", model: "gemini-1.5-pro" },
-          { name: "gemini-1.5-flash", model: "gemini-1.5-flash" },
-        ];
-        
-        logger.debug(
-          "CoordinatorRouter",
-          `Returning ${geminiModels.length} default Gemini models`
-        );
-        return geminiModels;
-      } else {
-        // Fetch Ollama models
-        const ollamaUrl =
-          process.env.OLLAMA_URL ||
-          process.env.OLLAMA_BASE_URL ||
-          "http://localhost:11434";
+      logger.debug(
+        "CoordinatorRouter",
+        `Returning ${models.length} models for ${providerType}`
+      );
 
-        const response = await fetch(`${ollamaUrl}/api/tags`, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        });
-
-        if (!response.ok) {
-          logger.warn("CoordinatorRouter", "Failed to fetch Ollama models", {
-            status: response.status,
-            statusText: response.statusText,
-          });
-          // Return default model if fetch fails
-          return [{ name: "gemma3:4b", model: "gemma3:4b" }];
-        }
-
-        const data = await response.json();
-        const models = data.models || [];
-
-        // Extract model names
-        const modelList = models.map((model: { name: string }) => ({
-          name: model.name,
-          model: model.name,
-        }));
-
-        logger.debug(
-          "CoordinatorRouter",
-          `Fetched ${modelList.length} Ollama models`,
-          {
-            modelCount: modelList.length,
-          }
-        );
-
-        // If no models found, return default
-        if (modelList.length === 0) {
-          return [{ name: "gemma3:4b", model: "gemma3:4b" }];
-        }
-
-        return modelList;
-      }
+      return models.map((model) => ({ name: model, model }));
     } catch (error) {
       logger.error(
         "CoordinatorRouter",
@@ -465,11 +311,12 @@ export const coordinatorRouter = createTRPCRouter({
         error instanceof Error ? error : new Error(String(error))
       );
       // Return default model on error based on provider
-      const providerType = (process.env.AI_PROVIDER as AIProviderType) || AIProviderType.OLLAMA;
+      const providerType =
+        (process.env.AI_PROVIDER as AIProviderType) || AIProviderType.OLLAMA;
       if (providerType === AIProviderType.GEMINI) {
         return [{ name: "gemini-2.5-flash", model: "gemini-2.5-flash" }];
       }
-      return [{ name: "gemma3:4b", model: "gemma3:4b" }];
+      return [{ name: "mistral:7b", model: "mistral:7b" }];
     }
   }),
 
@@ -2418,8 +2265,13 @@ Respond naturally:
 - Keep it brief and friendly`;
         }
 
-        const providerType = (process.env.AI_PROVIDER as AIProviderType) || AIProviderType.OLLAMA;
-        const model = input.model || process.env.DEFAULT_AI_MODEL || (providerType === AIProviderType.GEMINI ? "gemini-2.5-flash" : "gemma3:4b");
+        const providerType = getProviderType();
+        const model =
+          input.model ||
+          process.env.DEFAULT_AI_MODEL ||
+          (providerType === AIProviderType.GEMINI
+            ? process.env.GEMINI_MODEL || "gemini-2.5-flash"
+            : process.env.OLLAMA_MODEL || "mistral:7b");
 
         logger.debug("CoordinatorRouter", "Sending chat request", {
           provider: providerType,

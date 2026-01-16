@@ -3,6 +3,7 @@ import { parsePDFToText } from "@/lib/pdf-parser";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { logger } from "@/lib/logger";
+import { generateAIText } from "@/services/ai";
 
 export interface CourseOutcome {
   code: string; // e.g., "CO1", "CO2"
@@ -88,10 +89,6 @@ export async function extractCourseOutcomes(
  * Use AI to extract course outcomes from syllabus
  */
 async function extractCOsWithAI(content: string): Promise<CourseOutcome[]> {
-  const providerType = (process.env.AI_PROVIDER as string) || "OLLAMA";
-  const ollamaUrl = process.env.OLLAMA_URL || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-  const defaultModel = process.env.DEFAULT_AI_MODEL || "gemma3:4b";
-  
   const prompt = `Extract all Course Outcomes (COs) from the following syllabus text. Course Outcomes are typically numbered as CO1, CO2, CO3, etc., and describe what students should be able to do after completing the course.
 
 Return ONLY a valid JSON array in this format:
@@ -106,42 +103,14 @@ ${content.substring(0, 5000)} // Limit to first 5000 chars
 Return ONLY the JSON array, no other text.`;
 
   try {
-    if (providerType === "GEMINI" && process.env.GEMINI_API_KEY) {
-      const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: defaultModel,
-        contents: prompt,
-        config: {
-          temperature: 0.3,
-          topP: 0.8,
-          maxOutputTokens: 2000,
-        },
-      });
-      
-      const text = response.text || "";
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-    } else {
-      // Use Ollama
-      const response = await fetch(`${ollamaUrl}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: defaultModel,
-          prompt,
-          stream: false,
-        }),
-      });
-      
-      const data = await response.json();
-      const text = data.response || "";
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
+    const text = await generateAIText(prompt, {
+      temperature: 0.3,
+      topP: 0.8,
+      maxTokens: 2000,
+    });
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
     }
   } catch (error) {
     logger.error("QuestionPaperValidation", "AI extraction error", error);
@@ -271,10 +240,6 @@ function extractMarks(text: string): number {
  * Use AI to analyze question paper
  */
 async function analyzeWithAI(content: string): Promise<QuestionAnalysis[]> {
-  const providerType = (process.env.AI_PROVIDER as string) || "OLLAMA";
-  const ollamaUrl = process.env.OLLAMA_URL || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-  const defaultModel = process.env.DEFAULT_AI_MODEL || "gemma3:4b";
-  
   const prompt = `Analyze the following question paper and extract all questions with their details.
 
 For each question, extract:
@@ -303,42 +268,14 @@ ${content.substring(0, 8000)} // Limit to first 8000 chars
 Return ONLY the JSON array, no other text.`;
 
   try {
-    if (providerType === "GEMINI" && process.env.GEMINI_API_KEY) {
-      const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: defaultModel,
-        contents: prompt,
-        config: {
-          temperature: 0.3,
-          topP: 0.8,
-          maxOutputTokens: 4000,
-        },
-      });
-      
-      const text = response.text || "";
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-    } else {
-      // Use Ollama
-      const response = await fetch(`${ollamaUrl}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: defaultModel,
-          prompt,
-          stream: false,
-        }),
-      });
-      
-      const data = await response.json();
-      const text = data.response || "";
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
+    const text = await generateAIText(prompt, {
+      temperature: 0.3,
+      topP: 0.8,
+      maxTokens: 4000,
+    });
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
     }
   } catch (error) {
     logger.error("QuestionPaperValidation", "AI analysis error", error);

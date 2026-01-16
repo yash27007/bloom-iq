@@ -5,7 +5,13 @@
  * Supports Ollama and can be extended to support OpenAI, Anthropic, etc.
  */
 
-import { aiService } from "@/services/ai";
+import {
+  generateQuestions,
+  getProviderName,
+  listAvailableModels as listAIModels,
+  switchAIModel as switchAIModelService,
+  testAIConnection as testAIConnectionService,
+} from "@/services/ai";
 import type {
   QuestionGenerationParams,
   GeneratedQuestion,
@@ -30,16 +36,11 @@ export async function generateQuestionsWithAI(
   model?: string
 ): Promise<GeneratedQuestion[]> {
   try {
-    // Switch model if provided
-    if (model) {
-      aiService.switchModel(model);
-    }
-
     console.log(
-      `Generating questions using ${aiService.getProviderName()} provider${model ? ` with model ${model}` : ""}`
+      `Generating questions using ${getProviderName()} provider${model ? ` with model ${model}` : ""}`
     );
 
-    const questions = await aiService.generateQuestions(params);
+    const questions = await generateQuestions(params, model);
 
     console.log(`Successfully generated ${questions.length} questions`);
 
@@ -151,7 +152,7 @@ function generateMockQuestions(
  * @returns True if connection successful, false otherwise
  */
 export async function testAIConnection(): Promise<boolean> {
-  return aiService.testConnection();
+  return testAIConnectionService();
 }
 
 /**
@@ -160,7 +161,7 @@ export async function testAIConnection(): Promise<boolean> {
  * @returns Array of available model names
  */
 export async function listAvailableModels(): Promise<string[]> {
-  return aiService.listAvailableModels();
+  return listAIModels();
 }
 
 /**
@@ -169,5 +170,5 @@ export async function listAvailableModels(): Promise<string[]> {
  * @param model - Model name to switch to
  */
 export function switchAIModel(model: string): void {
-  aiService.switchModel(model);
+  switchAIModelService(model);
 }
