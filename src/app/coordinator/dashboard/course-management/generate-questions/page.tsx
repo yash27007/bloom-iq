@@ -28,13 +28,16 @@ export default function GenerateQuestionsPage() {
     const router = useRouter();
     const [selectedCourse, setSelectedCourse] = useState<string>('');
     const [selectedMaterial, setSelectedMaterial] = useState<string>('');
-    const [selectedModel, setSelectedModel] = useState<string>('gemma3:4b');
+    const [selectedProvider, setSelectedProvider] = useState<"GEMINI" | "OLLAMA">("OLLAMA");
+    const [selectedModel, setSelectedModel] = useState<string>('mistral:7b');
     const [showAdvanced, setShowAdvanced] = useState(false);
 
     // tRPC queries
     const { data: courses = [], isLoading: coursesLoading } = trpc.coordinator.getCoursesForMaterialUpload.useQuery();
     const { data: materials = [], isLoading: materialsLoading } = trpc.coordinator.getUploadedMaterials.useQuery();
-    const { data: ollamaModels = [], isLoading: modelsLoading } = trpc.coordinator.getOllamaModels.useQuery();
+    const { data: ollamaModels = [], isLoading: modelsLoading } = trpc.coordinator.getOllamaModels.useQuery({
+        provider: selectedProvider,
+    });
 
     // tRPC mutations
     const generateQuestionsMutation = trpc.coordinator.generateQuestions.useMutation({
@@ -124,6 +127,7 @@ export default function GenerateQuestionsPage() {
 
         generateQuestionsMutation.mutate({
             materialId: selectedMaterial,
+            provider: selectedProvider,
             model: selectedModel,
             questionCounts: totalQuestions,
             bloomLevels: finalBloomLevels,
@@ -200,13 +204,45 @@ export default function GenerateQuestionsPage() {
                     </CardContent>
                 </Card>
 
+                {/* AI Provider Selection */}
+                {selectedMaterial && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>AI Provider</CardTitle>
+                            <CardDescription>
+                                Choose which AI provider to use for question generation
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-2">
+                                <Label htmlFor="provider">Provider</Label>
+                                <Select
+                                    value={selectedProvider}
+                                    onValueChange={(value: "GEMINI" | "OLLAMA") => {
+                                        setSelectedProvider(value);
+                                        setSelectedModel(value === "GEMINI" ? "gemini-2.5-flash" : "mistral:7b");
+                                    }}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select provider" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="GEMINI">Gemini (Cloud)</SelectItem>
+                                        <SelectItem value="OLLAMA">Ollama (Local)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+
                 {/* Model Selection */}
                 {selectedMaterial && (
                     <Card>
                         <CardHeader>
                             <CardTitle>AI Model Selection</CardTitle>
                             <CardDescription>
-                                Choose the Ollama model to use for question generation
+                                Choose the model to use for question generation
                             </CardDescription>
                         </CardHeader>
                         <CardContent>

@@ -60,6 +60,7 @@ interface ValidationResult {
 
 export default function ValidateQuestionPaperPage() {
     const [selectedCourse, setSelectedCourse] = useState<string>("");
+    const [selectedProvider, setSelectedProvider] = useState<"GEMINI" | "OLLAMA">("OLLAMA");
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
@@ -153,6 +154,7 @@ export default function ValidateQuestionPaperPage() {
             validateMutation.mutate({
                 courseId: selectedCourse,
                 filename: data.filename,
+                provider: selectedProvider,
             });
         } catch (error) {
             toast.error(error instanceof Error ? error.message : "Upload failed");
@@ -228,6 +230,24 @@ export default function ValidateQuestionPaperPage() {
                                             {course.course_code} - {course.name}
                                         </SelectItem>
                                     ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {/* AI Provider Selection */}
+                        <div className="space-y-2">
+                            <Label htmlFor="provider">AI Provider</Label>
+                            <Select
+                                value={selectedProvider}
+                                onValueChange={(value: "GEMINI" | "OLLAMA") => setSelectedProvider(value)}
+                                disabled={uploading || validating}
+                            >
+                                <SelectTrigger id="provider">
+                                    <SelectValue placeholder="Select provider" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="GEMINI">Gemini (Cloud)</SelectItem>
+                                    <SelectItem value="OLLAMA">Ollama (Local)</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>

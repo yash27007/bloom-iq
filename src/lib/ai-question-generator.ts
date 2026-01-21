@@ -33,14 +33,17 @@ export type { QuestionGenerationParams, GeneratedQuestion };
  */
 export async function generateQuestionsWithAI(
   params: QuestionGenerationParams,
-  model?: string
+  model?: string,
+  provider?: "GEMINI" | "OLLAMA"
 ): Promise<GeneratedQuestion[]> {
   try {
     console.log(
-      `Generating questions using ${getProviderName()} provider${model ? ` with model ${model}` : ""}`
+      `Generating questions using ${getProviderName(
+        provider
+      )} provider${model ? ` with model ${model}` : ""}`
     );
 
-    const questions = await generateQuestions(params, model);
+    const questions = await generateQuestions(params, model, provider);
 
     console.log(`Successfully generated ${questions.length} questions`);
 

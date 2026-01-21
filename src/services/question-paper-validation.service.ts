@@ -52,7 +52,8 @@ export interface ValidationResult {
  * Extract course outcomes from syllabus content
  */
 export async function extractCourseOutcomes(
-  syllabusContent: string
+  syllabusContent: string,
+  provider?: "GEMINI" | "OLLAMA"
 ): Promise<CourseOutcome[]> {
   const outcomes: CourseOutcome[] = [];
   
@@ -75,7 +76,7 @@ export async function extractCourseOutcomes(
   // If no pattern matches, try AI extraction
   if (outcomes.length === 0) {
     try {
-      const aiExtracted = await extractCOsWithAI(syllabusContent);
+      const aiExtracted = await extractCOsWithAI(syllabusContent, provider);
       return aiExtracted;
     } catch (error) {
       logger.warn("QuestionPaperValidation", "AI extraction failed, using fallback", error);
@@ -88,7 +89,10 @@ export async function extractCourseOutcomes(
 /**
  * Use AI to extract course outcomes from syllabus
  */
-async function extractCOsWithAI(content: string): Promise<CourseOutcome[]> {
+async function extractCOsWithAI(
+  content: string,
+  provider?: "GEMINI" | "OLLAMA"
+): Promise<CourseOutcome[]> {
   const prompt = `Extract all Course Outcomes (COs) from the following syllabus text. Course Outcomes are typically numbered as CO1, CO2, CO3, etc., and describe what students should be able to do after completing the course.
 
 Return ONLY a valid JSON array in this format:
@@ -104,6 +108,7 @@ Return ONLY the JSON array, no other text.`;
 
   try {
     const text = await generateAIText(prompt, {
+      provider,
       temperature: 0.3,
       topP: 0.8,
       maxTokens: 2000,
@@ -123,7 +128,8 @@ Return ONLY the JSON array, no other text.`;
  * Analyze question paper PDF and extract questions with their details
  */
 export async function analyzeQuestionPaper(
-  pdfContent: string
+  pdfContent: string,
+  provider?: "GEMINI" | "OLLAMA"
 ): Promise<QuestionAnalysis[]> {
   const questions: QuestionAnalysis[] = [];
   
@@ -205,7 +211,7 @@ export async function analyzeQuestionPaper(
   // If pattern matching didn't work well, try AI extraction
   if (questions.length === 0) {
     try {
-      const aiExtracted = await analyzeWithAI(pdfContent);
+      const aiExtracted = await analyzeWithAI(pdfContent, provider);
       return aiExtracted;
     } catch (error) {
       logger.warn("QuestionPaperValidation", "AI analysis failed", error);
@@ -239,7 +245,10 @@ function extractMarks(text: string): number {
 /**
  * Use AI to analyze question paper
  */
-async function analyzeWithAI(content: string): Promise<QuestionAnalysis[]> {
+async function analyzeWithAI(
+  content: string,
+  provider?: "GEMINI" | "OLLAMA"
+): Promise<QuestionAnalysis[]> {
   const prompt = `Analyze the following question paper and extract all questions with their details.
 
 For each question, extract:
@@ -269,6 +278,7 @@ Return ONLY the JSON array, no other text.`;
 
   try {
     const text = await generateAIText(prompt, {
+      provider,
       temperature: 0.3,
       topP: 0.8,
       maxTokens: 4000,
@@ -289,7 +299,8 @@ Return ONLY the JSON array, no other text.`;
  */
 export async function validateQuestionPaper(
   courseId: string,
-  questionPaperPath: string
+  questionPaperPath: string,
+  provider?: "GEMINI" | "OLLAMA"
 ): Promise<ValidationResult> {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -310,7 +321,10 @@ export async function validateQuestionPaper(
   }
   
   // 2. Extract course outcomes from syllabus
-  const courseOutcomes = await extractCourseOutcomes(syllabus.parsedContent);
+  const courseOutcomes = await extractCourseOutcomes(
+    syllabus.parsedContent,
+    provider
+  );
   
   if (courseOutcomes.length === 0) {
     warnings.push("No course outcomes found in syllabus. Validation will be limited.");
@@ -322,7 +336,7 @@ export async function validateQuestionPaper(
   const pdfContent = await parsePDFToText(buffer);
   
   // 4. Analyze questions
-  const questions = await analyzeQuestionPaper(pdfContent.text);
+  const questions = await analyzeQuestionPaper(pdfContent.text, provider);
   
   if (questions.length === 0) {
     errors.push("No questions found in the question paper.");

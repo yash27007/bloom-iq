@@ -40,25 +40,32 @@ const ollamaProvider = createOllama({
 
 let modelOverride: string | null = null;
 
-export function getProviderType(): AIProviderType {
-  const raw = process.env.AI_PROVIDER || "OLLAMA";
+export function getProviderType(
+  override?: AIProviderType | string
+): AIProviderType {
+  const raw = override || process.env.AI_PROVIDER || "OLLAMA";
   const normalized = raw.toString().trim().toUpperCase();
   return normalized === "GEMINI" ? AIProviderType.GEMINI : AIProviderType.OLLAMA;
 }
 
-export function getProviderName(): string {
-  return getProviderType() === AIProviderType.GEMINI ? "Gemini" : "Ollama";
+export function getProviderName(
+  override?: AIProviderType | string
+): string {
+  return getProviderType(override) === AIProviderType.GEMINI ? "Gemini" : "Ollama";
 }
 
 export function switchAIModel(model: string): void {
   modelOverride = model;
 }
 
-function getModelName(explicitModel?: string): string {
+function getModelName(
+  explicitModel?: string,
+  providerOverride?: AIProviderType | string
+): string {
   if (explicitModel) return explicitModel;
   if (modelOverride) return modelOverride;
 
-  const providerType = getProviderType();
+  const providerType = getProviderType(providerOverride);
   if (providerType === AIProviderType.GEMINI) {
     return (
       process.env.GEMINI_MODEL ||
@@ -72,9 +79,12 @@ function getModelName(explicitModel?: string): string {
   );
 }
 
-function getModel(explicitModel?: string) {
-  const providerType = getProviderType();
-  const modelName = getModelName(explicitModel);
+function getModel(
+  explicitModel?: string,
+  providerOverride?: AIProviderType | string
+) {
+  const providerType = getProviderType(providerOverride);
+  const modelName = getModelName(explicitModel, providerOverride);
 
   if (providerType === AIProviderType.GEMINI) {
     if (!process.env.GEMINI_API_KEY) {
@@ -90,12 +100,16 @@ export async function generateAIText(
   prompt: string,
   options?: {
     model?: string;
+    provider?: AIProviderType | string;
     temperature?: number;
     topP?: number;
     maxTokens?: number;
   }
 ): Promise<string> {
-  const { model, providerType, modelName } = getModel(options?.model);
+  const { model, providerType, modelName } = getModel(
+    options?.model,
+    options?.provider
+  );
   const { text } = await generateText({
     model,
     prompt,
@@ -116,7 +130,8 @@ export async function generateAIText(
 
 export async function generateQuestions(
   params: QuestionGenerationParams,
-  model?: string
+  model?: string,
+  provider?: AIProviderType | string
 ): Promise<GeneratedQuestion[]> {
   const totalQuestions =
     params.questionCounts.easy +
@@ -132,7 +147,7 @@ export async function generateQuestions(
   });
 
   if (chunks.length === 1) {
-    return generateQuestionsFromChunk(params, chunks[0].content, model);
+    return generateQuestionsFromChunk(params, chunks[0].content, model, provider);
   }
 
   const questionsPerChunk = Math.ceil(totalQuestions / chunks.length);
@@ -155,7 +170,8 @@ export async function generateQuestions(
     const chunkQuestions = await generateQuestionsFromChunk(
       adjustedParams,
       chunks[i].content,
-      model
+      model,
+      provider
     );
 
     allQuestions.push(...chunkQuestions);
@@ -167,12 +183,14 @@ export async function generateQuestions(
 async function generateQuestionsFromChunk(
   params: QuestionGenerationParams,
   contentChunk: string,
-  model?: string
+  model?: string,
+  provider?: AIProviderType | string
 ): Promise<GeneratedQuestion[]> {
   const prompt = buildPrompt(params, contentChunk);
   const fullPrompt = `${OLLAMA_SYSTEM_PROMPT}\n\n${prompt}`;
   const responseText = await generateAIText(fullPrompt, {
     model,
+    provider,
     temperature: 0.7,
     topP: 0.9,
     maxTokens: 4000,
@@ -264,9 +282,14 @@ function adjustQuestionCounts(
   };
 }
 
-export async function testAIConnection(): Promise<boolean> {
+export async function testAIConnection(
+  provider?: AIProviderType | string
+): Promise<boolean> {
   try {
-    const response = await generateAIText("test", { maxTokens: 5 });
+    const response = await generateAIText("test", {
+      provider,
+      maxTokens: 5,
+    });
     return response.trim().length > 0;
   } catch (error) {
     logger.warn(
@@ -278,8 +301,10 @@ export async function testAIConnection(): Promise<boolean> {
   }
 }
 
-export async function listAvailableModels(): Promise<string[]> {
-  const providerType = getProviderType();
+export async function listAvailableModels(
+  provider?: AIProviderType | string
+): Promise<string[]> {
+  const providerType = getProviderType(provider);
   if (providerType === AIProviderType.GEMINI) {
     return [
       "gemini-2.5-flash",

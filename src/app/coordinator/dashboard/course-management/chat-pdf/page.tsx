@@ -22,7 +22,8 @@ interface Message {
 
 export default function ChatPDFPage() {
   const [selectedMaterial, setSelectedMaterial] = useState<string>("");
-  const [selectedModel, setSelectedModel] = useState<string>("gemma3:4b");
+  const [selectedProvider, setSelectedProvider] = useState<"GEMINI" | "OLLAMA">("OLLAMA");
+  const [selectedModel, setSelectedModel] = useState<string>("mistral:7b");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -31,7 +32,9 @@ export default function ChatPDFPage() {
 
   // Fetch materials and models
   const { data: materials = [], isLoading: materialsLoading } = trpc.coordinator.getUploadedMaterials.useQuery();
-  const { data: ollamaModels = [], isLoading: modelsLoading } = trpc.coordinator.getOllamaModels.useQuery();
+  const { data: ollamaModels = [], isLoading: modelsLoading } = trpc.coordinator.getOllamaModels.useQuery({
+    provider: selectedProvider,
+  });
 
   // Chat mutation
   const chatMutation = trpc.coordinator.chatWithPDF.useMutation({
@@ -97,6 +100,7 @@ export default function ChatPDFPage() {
     await chatMutation.mutateAsync({
       materialId: selectedMaterial,
       message: input,
+      provider: selectedProvider,
       model: selectedModel,
     });
   };
@@ -145,7 +149,7 @@ export default function ChatPDFPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="md:col-span-1">
                 <Label htmlFor="material" className="text-sm font-medium mb-2 block">
                   Course Material
@@ -170,6 +174,26 @@ export default function ChatPDFPage() {
                           </div>
                         </SelectItem>
                       ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="md:col-span-1">
+                <Label htmlFor="provider" className="text-sm font-medium mb-2 block">
+                  AI Provider
+                </Label>
+                <Select
+                  value={selectedProvider}
+                  onValueChange={(value: "GEMINI" | "OLLAMA") => {
+                    setSelectedProvider(value);
+                    setSelectedModel(value === "GEMINI" ? "gemini-2.5-flash" : "mistral:7b");
+                  }}
+                >
+                  <SelectTrigger id="provider" className="h-11">
+                    <SelectValue placeholder="Select provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="GEMINI">Gemini (Cloud)</SelectItem>
+                    <SelectItem value="OLLAMA">Ollama (Local)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -212,6 +236,10 @@ export default function ChatPDFPage() {
                   <FileText className="h-3 w-3" />
                   {selectedMaterialData.title}
                 </Badge>
+                  <Badge variant="outline" className="gap-1">
+                    <Cpu className="h-3 w-3" />
+                    {selectedProvider}
+                  </Badge>
                 <Badge variant="outline" className="gap-1">
                   <Cpu className="h-3 w-3" />
                   {selectedModel}
@@ -365,7 +393,7 @@ export default function ChatPDFPage() {
             </div>
             {selectedMaterial && (
               <p className="text-xs text-muted-foreground mt-2 ml-1">
-                Powered by {selectedModel} • Answers are based on the selected material
+                Powered by {selectedProvider} • {selectedModel} • Answers are based on the selected material
               </p>
             )}
           </div>

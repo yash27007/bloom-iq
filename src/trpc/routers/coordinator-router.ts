@@ -107,10 +107,12 @@ function sanitizeChatResponse(response: string): string {
  */
 async function generateChatResponse(
   prompt: string,
-  model?: string
+  model?: string,
+  provider?: AIProviderType
 ): Promise<string> {
   return generateAIText(prompt, {
     model,
+    provider,
     temperature: 0.7,
     topP: 0.9,
     maxTokens: 1000,
@@ -123,7 +125,8 @@ async function generateChatResponse(
  */
 async function decideFunctionCall(
   message: string,
-  model?: string
+  model?: string,
+  provider?: AIProviderType
 ): Promise<FunctionCall> {
   const decisionPrompt = `You are a decision-making assistant. Analyze the user's message and decide if you need to search course material.
 
@@ -156,6 +159,7 @@ Respond with ONLY this JSON format (no other text):
   try {
     const responseText = await generateAIText(decisionPrompt, {
       model,
+      provider,
       temperature: 0.2,
       maxTokens: 200,
     });
@@ -292,11 +296,15 @@ async function ensureChatHistoryTable() {
 
 export const coordinatorRouter = createTRPCRouter({
   // Get available AI models (supports both Ollama and Gemini)
-  getOllamaModels: coordinatorProcedure.query(async () => {
+  getOllamaModels: coordinatorProcedure
+    .input(z.object({ provider: z.enum(["GEMINI", "OLLAMA"]).optional() }).optional())
+    .query(async ({ input }) => {
     try {
       const providerType =
-        (process.env.AI_PROVIDER as AIProviderType) || AIProviderType.OLLAMA;
-      const models = await listAvailableModels();
+        (input?.provider as AIProviderType) ||
+        (process.env.AI_PROVIDER as AIProviderType) ||
+        AIProviderType.OLLAMA;
+      const models = await listAvailableModels(providerType);
 
       logger.debug(
         "CoordinatorRouter",
@@ -312,7 +320,9 @@ export const coordinatorRouter = createTRPCRouter({
       );
       // Return default model on error based on provider
       const providerType =
-        (process.env.AI_PROVIDER as AIProviderType) || AIProviderType.OLLAMA;
+        (input?.provider as AIProviderType) ||
+        (process.env.AI_PROVIDER as AIProviderType) ||
+        AIProviderType.OLLAMA;
       if (providerType === AIProviderType.GEMINI) {
         return [{ name: "gemini-2.5-flash", model: "gemini-2.5-flash" }];
       }
@@ -1015,7 +1025,8 @@ export const coordinatorRouter = createTRPCRouter({
     .input(
       z.object({
         materialId: z.string(),
-        model: z.string().optional().default("gemma3:4b"),
+        provider: z.enum(["GEMINI", "OLLAMA"]).optional(),
+        model: z.string().optional(),
         questionCounts: z.object({
           easy: z.number().min(0).max(50),
           medium: z.number().min(0).max(50),
@@ -1183,7 +1194,8 @@ export const coordinatorRouter = createTRPCRouter({
                 bloomLevels: input.bloomLevels,
                 questionTypes: input.questionTypes,
               },
-              input.model // Pass the model parameter
+              input.model,
+              input.provider
             );
 
             // Update job status
@@ -1941,6 +1953,7 @@ export const coordinatorRouter = createTRPCRouter({
       z.object({
         materialId: z.string(),
         message: z.string().min(1),
+        provider: z.enum(["GEMINI", "OLLAMA"]).optional(),
         model: z.string().optional(),
       })
     )
@@ -2000,7 +2013,8 @@ export const coordinatorRouter = createTRPCRouter({
         // Use function calling to let the model decide if it needs material content
         const functionCall = await decideFunctionCall(
           input.message,
-          input.model
+          input.model,
+          input.provider as AIProviderType | undefined
         );
         const useRAG = functionCall.name === "search_material";
 
@@ -2283,7 +2297,11 @@ Respond naturally:
 
         let answer: string;
         try {
-          answer = await generateChatResponse(prompt, model);
+          answer = await generateChatResponse(
+            prompt,
+            model,
+            input.provider as AIProviderType | undefined
+          );
           if (!answer) {
             answer = "I'm Kai, and I couldn't generate a response. Please try again.";
           }
@@ -2531,6 +2549,7 @@ Respond naturally:
       z.object({
         courseId: z.string(),
         filename: z.string(),
+        provider: z.enum(["GEMINI", "OLLAMA"]).optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -2570,7 +2589,8 @@ Respond naturally:
         // Validate the question paper
         const result = await validateQuestionPaper(
           input.courseId,
-          `uploads/${input.filename}`
+          `uploads/${input.filename}`,
+          input.provider
         );
 
         return result;
