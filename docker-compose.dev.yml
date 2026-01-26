@@ -1,4 +1,4 @@
-# Development Docker Compose - PostgreSQL & ChromaDB
+# Development Docker Compose - PostgreSQL only
 # 
 # Usage:
 #   Start:  docker compose -f docker-compose.dev.yml up -d
@@ -7,6 +7,9 @@
 #
 # Note: Containers will NOT auto-start when Docker opens.
 #       You must manually run 'up' command each time.
+#
+# Vector embeddings are stored directly in PostgreSQL (no ChromaDB needed).
+# For production, use Neon DB which supports pgvector.
 
 services:
   postgres:
@@ -27,20 +30,6 @@ services:
       timeout: 5s
       retries: 5
 
-  chromadb:
-    image: chromadb/chroma:latest
-    container_name: bloom-iq-chromadb
-    # No restart policy = won't auto-start
-    ports:
-      - "8000:8000"
-    volumes:
-      - bloom_chroma_data:/chroma/chroma
-    environment:
-      - IS_PERSISTENT=TRUE
-      - ANONYMIZED_TELEMETRY=FALSE
-
 volumes:
   bloom_postgres_data:
-    driver: local
-  bloom_chroma_data:
     driver: local

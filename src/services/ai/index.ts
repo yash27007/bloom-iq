@@ -3,12 +3,17 @@
  *
  * Central access point for AI tasks using the Vercel AI SDK with
  * Gemini (Google Generative AI) and Ollama providers.
+ * 
+ * Features:
+ * - Round-robin API key rotation for Gemini (avoids rate limiting)
+ * - Support for multiple API keys via GEMINI_API_KEY, GEMINI_API_KEY_1, etc.
  */
 
 import { generateText } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOllama } from "ollama-ai-provider-v2";
 import { logger } from "@/lib/logger";
+import { geminiKeyManager } from "@/lib/gemini-key-manager";
 import type { QuestionGenerationParams, GeneratedQuestion } from "./types";
 import { chunkContent } from "@/lib/content-chunker";
 import { OLLAMA_SYSTEM_PROMPT } from "./prompts/ollama-prompt";
@@ -22,9 +27,13 @@ export enum AIProviderType {
   GEMINI = "GEMINI",
 }
 
-const geminiProvider = createGoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY || "",
-});
+/**
+ * Get a Gemini provider with the next available API key (round-robin)
+ */
+function getGeminiProvider() {
+  const apiKey = geminiKeyManager.getNextKey();
+  return createGoogleGenerativeAI({ apiKey });
+}
 
 const rawOllamaUrl =
   process.env.OLLAMA_URL ||
@@ -87,9 +96,11 @@ function getModel(
   const modelName = getModelName(explicitModel, providerOverride);
 
   if (providerType === AIProviderType.GEMINI) {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error("GEMINI_API_KEY is required but not found");
+    if (geminiKeyManager.getKeyCount() === 0) {
+      throw new Error("GEMINI_API_KEY is required but not found. Set GEMINI_API_KEY or GEMINI_API_KEY_1, GEMINI_API_KEY_2, etc.");
     }
+    // Use round-robin key rotation
+    const geminiProvider = getGeminiProvider();
     return { model: geminiProvider(modelName), providerType, modelName };
   }
 

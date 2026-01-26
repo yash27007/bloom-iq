@@ -851,7 +851,7 @@ export const coordinatorRouter = createTRPCRouter({
           }
         );
 
-        // 1. Delete embeddings from ChromaDB first
+        // 1. Delete chunks/embeddings from PostgreSQL via VectorDBService
         try {
           const { VectorDBService } = await import(
             "@/services/vector-db.service"
@@ -860,7 +860,7 @@ export const coordinatorRouter = createTRPCRouter({
           await vectorDB.deleteMaterialChunks(input.materialId);
           logger.info(
             "CoordinatorRouter",
-            `Deleted ChromaDB embeddings for material ${input.materialId}`,
+            `Deleted vector chunks for material ${input.materialId}`,
             {
               materialId: input.materialId,
             }
@@ -868,7 +868,7 @@ export const coordinatorRouter = createTRPCRouter({
         } catch (vectorError) {
           logger.warn(
             "CoordinatorRouter",
-            `Failed to delete ChromaDB embeddings (may not be initialized)`,
+            `Error deleting vector chunks`,
             {
               materialId: input.materialId,
               error:
@@ -877,10 +877,9 @@ export const coordinatorRouter = createTRPCRouter({
                   : String(vectorError),
             }
           );
-          // Continue with deletion even if ChromaDB fails
         }
 
-        // 2. Delete chunks from PostgreSQL (explicitly, though cascade should handle it)
+        // 2. Delete chunks from PostgreSQL (safety - cascade should handle it)
         const deletedChunks = await prisma.material_Chunk.deleteMany({
           where: { materialId: input.materialId },
         });
@@ -1084,73 +1083,26 @@ export const coordinatorRouter = createTRPCRouter({
           });
         }
 
-        // Fetch chunks from ChromaDB (with PostgreSQL fallback)
-        let chunks: Array<{ content: string }> = [];
-        let materialContent = "";
+        // Fetch chunks from PostgreSQL (Material_Chunk table stores embeddings)
+        const chunks = await prisma.material_Chunk.findMany({
+          where: {
+            materialId: input.materialId,
+            unit: material.unit,
+          },
+          orderBy: {
+            chunkIndex: "asc",
+          },
+        });
 
-        try {
-          // Try ChromaDB first
-          const { VectorDBService } = await import(
-            "@/services/vector-db.service"
-          );
-          const vectorDB = new VectorDBService();
-          const canConnect = await vectorDB.testConnection();
-
-          if (canConnect) {
-            // Get all chunks for this material (we'll combine them all for question generation)
-            // For now, we'll use a dummy embedding to get all chunks
-            // In a real scenario, you might want to use the material's parsed content embedding
-            const { EmbeddingService } = await import(
-              "@/services/embedding.service"
-            );
-            const embeddingService = new EmbeddingService();
-            const queryEmbedding = await embeddingService.generateEmbedding(
-              material.title
-            );
-
-            const chromaChunks = await vectorDB.searchChunks(
-              queryEmbedding.embedding,
-              { materialId: input.materialId, unit: material.unit },
-              100 // Get up to 100 chunks
-            );
-
-            if (chromaChunks.length > 0) {
-              chunks = chromaChunks.map((c) => ({ content: c.content }));
-              materialContent = chunks
-                .map((chunk) => chunk.content)
-                .join("\n\n");
-            }
-          }
-        } catch (vectorError) {
-          console.warn(
-            "[Question Generation] ChromaDB not available, falling back to PostgreSQL:",
-            vectorError
-          );
-        }
-
-        // Fallback to PostgreSQL if ChromaDB didn't work or returned no chunks
         if (chunks.length === 0) {
-          const dbChunks = await prisma.material_Chunk.findMany({
-            where: {
-              materialId: input.materialId,
-              unit: material.unit,
-            },
-            orderBy: {
-              chunkIndex: "asc",
-            },
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "Material chunks not found. The material may still be processing embeddings. Please wait a moment and try again.",
           });
-
-          if (dbChunks.length === 0) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message:
-                "Material chunks not found. The material may still be processing embeddings. Please wait a moment and try again.",
-            });
-          }
-
-          chunks = dbChunks;
-          materialContent = chunks.map((chunk) => chunk.content).join("\n\n");
         }
+
+        const materialContent = chunks.map((chunk) => chunk.content).join("\n\n");
 
         console.log(`[Question Generation] Material ID: ${material.id}`);
         console.log(`[Question Generation] Material Title: ${material.title}`);
@@ -2029,7 +1981,7 @@ export const coordinatorRouter = createTRPCRouter({
 
         // Only fetch embeddings and search if the model decided to use search_material
         if (useRAG) {
-          // Get relevant chunks using RAG
+          // Get relevant chunks using semantic search in PostgreSQL
           const { VectorDBService } = await import(
             "@/services/vector-db.service"
           );
@@ -2041,101 +1993,48 @@ export const coordinatorRouter = createTRPCRouter({
             const vectorDB = new VectorDBService();
             const embeddingService = new EmbeddingService();
 
-            const canConnect = await vectorDB.testConnection();
-            if (canConnect) {
-              // Check if chunks exist for this material
-              const hasChunks = await vectorDB.hasChunksForMaterial(
-                input.materialId
-              );
-              logger.debug("CoordinatorRouter", "ChromaDB chunk check", {
-                materialId: input.materialId,
-                hasChunks,
-              });
+            // Generate embedding for the query
+            const queryEmbedding = await embeddingService.generateEmbedding(
+              input.message
+            );
 
-              if (!hasChunks) {
-                logger.warn(
-                  "CoordinatorRouter",
-                  "No chunks found in ChromaDB for material",
-                  {
-                    materialId: input.materialId,
-                  }
-                );
-                // Fall through to PostgreSQL fallback
-              } else {
-                // Generate embedding for the query
-                const queryEmbedding = await embeddingService.generateEmbedding(
-                  input.message
-                );
+            // Search for relevant chunks using cosine similarity
+            const chunks = await vectorDB.searchChunks(
+              queryEmbedding.embedding,
+              { materialId: input.materialId, unit: material.unit || 0 },
+              5 // Top 5 most relevant chunks
+            );
 
-                // Try searching with unit filter first
-                let chunks = await vectorDB.searchChunks(
-                  queryEmbedding.embedding,
-                  { materialId: input.materialId, unit: material.unit || 0 },
-                  5 // Top 5 most relevant chunks
-                );
-
-                // If no results with unit filter, try without unit filter (in case unit was stored differently)
-                if (
-                  chunks.length === 0 &&
-                  material.unit !== undefined &&
-                  material.unit !== null
-                ) {
-                  logger.debug(
-                    "CoordinatorRouter",
-                    "No chunks found with unit filter, trying without unit",
-                    {
-                      materialId: input.materialId,
-                      unit: material.unit,
-                    }
-                  );
-                  chunks = await vectorDB.searchChunks(
-                    queryEmbedding.embedding,
-                    { materialId: input.materialId },
-                    5
-                  );
-                }
-
-                relevantChunks = chunks.map((c) => c.content);
-                logger.debug(
-                  "CoordinatorRouter",
-                  "Found chunks from ChromaDB",
-                  {
-                    chunkCount: chunks.length,
-                    materialId: input.materialId,
-                    unit: material.unit,
-                  }
-                );
-              }
-            }
-
-            // If no chunks from ChromaDB, try PostgreSQL fallback
-            if (relevantChunks.length === 0) {
-              logger.info(
+            if (chunks.length > 0) {
+              relevantChunks = chunks.map((c) => c.content);
+              logger.debug(
                 "CoordinatorRouter",
-                "No chunks from ChromaDB, trying PostgreSQL fallback",
+                "Found relevant chunks via semantic search",
                 {
+                  chunkCount: chunks.length,
                   materialId: input.materialId,
                   unit: material.unit,
                 }
               );
-              // Fallback to PostgreSQL
+            } else {
+              // Fallback to sequential chunks if no semantic results
               const dbChunks = await prisma.material_Chunk.findMany({
                 where: {
                   materialId: input.materialId,
                   unit: material.unit || 0,
                 },
-                take: 10, // Get more chunks as fallback
+                take: 10,
                 orderBy: { chunkIndex: "asc" },
               });
               relevantChunks = dbChunks.map((c) => c.content);
-              logger.debug("CoordinatorRouter", "Using PostgreSQL chunks", {
+              logger.debug("CoordinatorRouter", "Using sequential chunks fallback", {
                 chunkCount: dbChunks.length,
               });
             }
           } catch (vectorError) {
             logger.warn(
               "CoordinatorRouter",
-              "Vector search failed, trying PostgreSQL fallback",
+              "Semantic search failed, using sequential chunks",
               {
                 materialId: input.materialId,
                 error:
@@ -2144,33 +2043,16 @@ export const coordinatorRouter = createTRPCRouter({
                     : String(vectorError),
               }
             );
-            // Fallback: use all chunks from PostgreSQL
-            try {
-              const dbChunks = await prisma.material_Chunk.findMany({
-                where: {
-                  materialId: input.materialId,
-                  unit: material.unit || 0,
-                },
-                orderBy: { chunkIndex: "asc" },
-                take: 10, // Get more chunks as fallback
-              });
-              relevantChunks = dbChunks.map((c) => c.content);
-              logger.debug(
-                "CoordinatorRouter",
-                "Using PostgreSQL chunks as fallback",
-                {
-                  chunkCount: dbChunks.length,
-                }
-              );
-            } catch (dbError) {
-              logger.error(
-                "CoordinatorRouter",
-                "PostgreSQL fallback also failed",
-                undefined,
-                dbError instanceof Error ? dbError : new Error(String(dbError))
-              );
-              relevantChunks = [];
-            }
+            // Fallback: use sequential chunks
+            const dbChunks = await prisma.material_Chunk.findMany({
+              where: {
+                materialId: input.materialId,
+                unit: material.unit || 0,
+              },
+              orderBy: { chunkIndex: "asc" },
+              take: 10,
+            });
+            relevantChunks = dbChunks.map((c) => c.content);
           }
 
           // Check if we have any chunks at all (only for RAG queries)

@@ -6,6 +6,9 @@
  * - Background PDF parsing
  * - Material retrieval with parsing status
  * - Material deletion with file cleanup
+ * 
+ * Vector embeddings are stored directly in PostgreSQL (Float[] arrays).
+ * For production, use Neon DB which supports pgvector for efficient similarity search.
  */
 
 import { prisma } from "@/lib/prisma";
@@ -262,7 +265,7 @@ export class MaterialService {
   /**
    * Background embedding generation (non-blocking)
    * Creates chunks and embeddings for the parsed material
-   * Can be called manually to retrigger embedding for a material
+   * Stores embeddings directly in PostgreSQL (Material_Chunk table)
    */
   static async embedMaterialInBackground(
     materialId: string,
@@ -308,33 +311,13 @@ export class MaterialService {
       });
 
       // Delete existing chunks for this material (in case of re-embedding)
-      // Delete from PostgreSQL (for backward compatibility)
-      await prisma.material_Chunk.deleteMany({
-        where: { materialId },
-      });
-
-      // Delete from ChromaDB
       const vectorDB = new VectorDBService();
-      try {
-        await vectorDB.deleteMaterialChunks(materialId);
-        logger.info(
-          "VectorDB",
-          `Deleted existing chunks from ChromaDB for material ${materialId}`,
-          { materialId }
-        );
-      } catch (vectorError) {
-        logger.warn(
-          "VectorDB",
-          `Failed to delete from ChromaDB (may not be initialized)`,
-          {
-            materialId,
-            error:
-              vectorError instanceof Error
-                ? vectorError.message
-                : String(vectorError),
-          }
-        );
-      }
+      await vectorDB.deleteMaterialChunks(materialId);
+      logger.info(
+        "VectorDB",
+        `Deleted existing chunks for material ${materialId}`,
+        { materialId }
+      );
 
       // Create embedding service and chunk/embed the content
       const embeddingService = new EmbeddingService();
@@ -344,13 +327,12 @@ export class MaterialService {
       if (!canEmbed) {
         logger.warn(
           "EmbeddingService",
-          "Ollama connection failed, storing chunks without embeddings",
+          "Embedding service connection failed, will retry",
           { materialId }
         );
       }
 
       // Use chunkAndEmbed with progress tracking for better performance
-      // This processes embeddings in parallel batches (3 at a time)
       const chunksWithEmbeddings = await embeddingService.chunkAndEmbed(
         content,
         unit,
@@ -358,7 +340,6 @@ export class MaterialService {
           maxTokensPerChunk: 3000,
           minTokensPerChunk: 500,
           onProgress: (current, total) => {
-            // Log progress every chunk
             logger.logEmbeddingProgress(materialId, current, total);
           },
         }
@@ -378,7 +359,7 @@ export class MaterialService {
         throw new Error("No chunks with valid embeddings generated");
       }
 
-      // Batch store all chunks in ChromaDB (much more efficient than one-by-one)
+      // Store all chunks in PostgreSQL via VectorDBService
       const chunksToStore = validChunks.map((chunk) => ({
         content: chunk.content,
         embedding: chunk.embedding,
@@ -392,58 +373,15 @@ export class MaterialService {
         },
       }));
 
-      // Store all chunks in ChromaDB in one batch operation
-      try {
-        await vectorDB.storeChunks(chunksToStore);
-        logger.info(
-          "VectorDB",
-          `Stored ${chunksToStore.length} chunks in ChromaDB`,
-          {
-            materialId,
-            chunkCount: chunksToStore.length,
-          }
-        );
-      } catch (vectorError) {
-        logger.warn(
-          "VectorDB",
-          `Failed to store in ChromaDB, falling back to PostgreSQL`,
-          {
-            materialId,
-            error:
-              vectorError instanceof Error
-                ? vectorError.message
-                : String(vectorError),
-          }
-        );
-
-        // Fallback to PostgreSQL - batch insert for efficiency
-        // Only store chunks with valid embeddings
-        await prisma.material_Chunk
-          .createMany({
-            data: validChunks.map((chunk) => ({
-              materialId,
-              unit,
-              chunkIndex: chunk.chunkIndex,
-              title: chunk.title,
-              content: chunk.content,
-              tokenCount: chunk.tokenCount, // Fixed: schema uses tokenCount, not tokens
-              embedding: chunk.embedding,
-              metadata: chunk.metadata,
-            })),
-            skipDuplicates: true,
-          })
-          .catch((dbError) => {
-            logger.error(
-              "EmbeddingService",
-              "Failed to store chunks in PostgreSQL",
-              dbError instanceof Error ? dbError : new Error(String(dbError)),
-              {
-                materialId,
-                chunkCount: chunksWithEmbeddings.length,
-              }
-            );
-          });
-      }
+      await vectorDB.storeChunks(chunksToStore);
+      logger.info(
+        "VectorDB",
+        `Stored ${chunksToStore.length} chunks in PostgreSQL`,
+        {
+          materialId,
+          chunkCount: chunksToStore.length,
+        }
+      );
 
       // Update status to COMPLETED
       await prisma.course_Material.update({
@@ -581,8 +519,7 @@ export class MaterialService {
 
   /**
    * Delete material with complete cleanup:
-   * - ChromaDB embeddings
-   * - PostgreSQL chunks
+   * - PostgreSQL chunks (with embeddings)
    * - Related questions
    * - Question generation jobs
    * - Chat history
@@ -618,33 +555,18 @@ export class MaterialService {
         throw new Error("Material not found.");
       }
 
-      // 1. Delete embeddings from ChromaDB
-      try {
-        const vectorDB = new VectorDBService();
-        await vectorDB.deleteMaterialChunks(materialId);
-        logger.info(
-          "MaterialService",
-          `Deleted ChromaDB embeddings for material ${materialId}`,
-          {
-            materialId,
-          }
-        );
-      } catch (vectorError) {
-        logger.warn(
-          "MaterialService",
-          `Failed to delete ChromaDB embeddings (may not be initialized)`,
-          {
-            materialId,
-            error:
-              vectorError instanceof Error
-                ? vectorError.message
-                : String(vectorError),
-          }
-        );
-        // Continue with deletion even if ChromaDB fails
-      }
+      // 1. Delete embeddings/chunks from PostgreSQL via VectorDBService
+      const vectorDB = new VectorDBService();
+      await vectorDB.deleteMaterialChunks(materialId);
+      logger.info(
+        "MaterialService",
+        `Deleted chunks for material ${materialId}`,
+        {
+          materialId,
+        }
+      );
 
-      // 2. Delete chunks from PostgreSQL (explicitly, though cascade should handle it)
+      // 2. Delete chunks from PostgreSQL directly (for safety)
       const deletedChunks = await prisma.material_Chunk.deleteMany({
         where: { materialId },
       });

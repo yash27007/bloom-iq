@@ -28,7 +28,40 @@ NEXTAUTH_SECRET=generate-a-random-32-char-string
 NEXTAUTH_URL=https://your-app.vercel.app
 ```
 
-> **Note**: ChromaDB (vector search) requires a hosted solution for Vercel. For MVP, you can skip it - the app will still work but without semantic search.
+---
+
+## 🔄 Round-Robin API Keys (Avoid Rate Limits)
+
+When using free Gemini API keys, you may hit rate limits during testing.
+The app supports **round-robin rotation** through multiple API keys automatically!
+
+### How to Set Up Multiple Keys
+
+Add multiple Gemini API keys to your environment:
+
+```env
+# Primary key
+GEMINI_API_KEY=AIzaSy...your_first_key
+
+# Additional keys (1-10 supported)
+GEMINI_API_KEY_1=AIzaSy...your_second_key
+GEMINI_API_KEY_2=AIzaSy...your_third_key
+GEMINI_API_KEY_3=AIzaSy...your_fourth_key
+```
+
+### How It Works
+
+1. The app automatically rotates through all configured keys
+2. When a key hits a rate limit, it's temporarily cooled down (60 seconds)
+3. The next available key is used
+4. This allows uninterrupted testing with free tier keys
+
+### Tips for Free Tier Keys
+
+- Create multiple Google accounts (or use different Google Workspace accounts)
+- Get an API key from each: https://aistudio.google.com/app/apikey
+- Add all keys to your `.env` file
+- The more keys, the better the rate limit handling
 
 ---
 
@@ -37,49 +70,21 @@ NEXTAUTH_URL=https://your-app.vercel.app
 ### Option A: Using Neon DB (Easiest)
 Just use your Neon DB connection string locally too.
 
-### Option B: Using Docker (Full Local Stack)
+### Option B: Using Docker (Local PostgreSQL)
 
 ```bash
-# Start PostgreSQL and ChromaDB
+# Start PostgreSQL only (no ChromaDB needed!)
 docker compose -f docker-compose.dev.yml up -d
 
 # Then use these in .env:
 DATABASE_URL=postgresql://bloom_user:bloom_password@localhost:5432/bloom_iq
-CHROMA_URL=http://localhost:8000
+DIRECT_URL=postgresql://bloom_user:bloom_password@localhost:5432/bloom_iq
 ```
+
+> **Note**: Vector embeddings are stored directly in PostgreSQL using the `Float[]` type.
+> No separate vector database (like ChromaDB) is needed!
 
 ---
-
-## Quick Configuration for Gemini
-
-To use Gemini, update your `.env` file with these settings:
-
-```env
-# Switch to Gemini
-AI_PROVIDER=GEMINI
-
-# Add your Gemini API key (get it from https://aistudio.google.com/app/apikey)
-GEMINI_API_KEY=your_api_key_here
-
-# Optional: Choose Gemini model (default: gemini-2.5-flash)
-GEMINI_MODEL=gemini-2.5-flash
-```
-
-## Quick Configuration for Ollama
-
-To use Ollama, update your `.env` file with these settings:
-
-```env
-# Switch to Ollama
-AI_PROVIDER=OLLAMA
-
-# Ollama URL (default: http://localhost:11434)
-OLLAMA_URL=http://localhost:11434
-OLLAMA_BASE_URL=http://localhost:11434
-
-# Choose Ollama model (default: mistral:7b)
-OLLAMA_MODEL=mistral:7b
-```
 
 ## Complete .env Template
 
@@ -89,8 +94,13 @@ Here's a complete `.env` file template with all options:
 # ============================================
 # DATABASE CONFIGURATION
 # ============================================
+# For local development with Docker:
 DATABASE_URL=postgresql://bloom_user:bloom_password@localhost:5432/bloom_iq
 DIRECT_URL=postgresql://bloom_user:bloom_password@localhost:5432/bloom_iq
+
+# For Vercel with Neon DB:
+# DATABASE_URL=postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/bloom_iq?sslmode=require
+# DIRECT_URL=postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/bloom_iq?sslmode=require
 
 # ============================================
 # AUTHENTICATION
@@ -105,11 +115,16 @@ NEXTAUTH_URL=http://localhost:3000
 AI_PROVIDER=GEMINI
 
 # ============================================
-# GEMINI CONFIGURATION
+# GEMINI CONFIGURATION (Recommended for Vercel)
 # ============================================
 # Get API key from: https://aistudio.google.com/app/apikey
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-2.5-flash
+
+# Optional: Additional keys for round-robin rotation (avoids rate limits)
+# GEMINI_API_KEY_1=another_key_here
+# GEMINI_API_KEY_2=another_key_here
+# GEMINI_API_KEY_3=another_key_here
 
 # Available Gemini models:
 # - gemini-2.5-flash (fast, recommended)
@@ -119,7 +134,7 @@ GEMINI_MODEL=gemini-2.5-flash
 # - gemini-1.5-flash (balanced)
 
 # ============================================
-# OLLAMA CONFIGURATION
+# OLLAMA CONFIGURATION (Local Development Only)
 # ============================================
 # Only needed if AI_PROVIDER=OLLAMA
 OLLAMA_URL=http://localhost:11434
@@ -137,40 +152,7 @@ OLLAMA_EMBEDDING_MODEL=nomic-embed-text:v1.5
 # ============================================
 # DEFAULT AI MODEL (FALLBACK)
 # ============================================
-DEFAULT_AI_MODEL=mistral:7b
-
-# ============================================
-# VECTOR DATABASE (CHROMADB)
-# ============================================
-CHROMA_URL=http://localhost:8000
-CHROMA_COLLECTION=material_chunks
-```
-
-## Switching Between Providers
-
-### Method 1: Edit .env File
-
-1. Open your `.env` file
-2. Change `AI_PROVIDER`:
-   - For Gemini: `AI_PROVIDER=GEMINI`
-   - For Ollama: `AI_PROVIDER=OLLAMA`
-3. Add/update the corresponding API key or URL
-4. Restart your development server
-
-### Method 2: Use Different Files
-
-**For Development (Gemini)**:
-```bash
-# Create .env.local
-cp .env .env.local
-# Edit .env.local and set AI_PROVIDER=GEMINI
-```
-
-**For Production (Ollama)**:
-```bash
-# Use .env.production
-cp .env .env.production
-# Edit .env.production and set AI_PROVIDER=OLLAMA
+DEFAULT_AI_MODEL=gemini-2.5-flash
 ```
 
 ## Getting Gemini API Key
@@ -184,6 +166,26 @@ cp .env .env.production
    GEMINI_API_KEY=your_copied_key_here
    ```
 
+## Switching Between Providers
+
+### Method 1: Edit .env File
+
+1. Open your `.env` file
+2. Change `AI_PROVIDER`:
+   - For Gemini: `AI_PROVIDER=GEMINI`
+   - For Ollama: `AI_PROVIDER=OLLAMA`
+3. Add/update the corresponding API key or URL
+4. Restart your development server
+
+### Method 2: UI Toggle (Recommended)
+
+The app includes a UI toggle on the:
+- Generate Questions page
+- Chat with PDF page
+- Validate Question Paper page
+
+You can switch providers directly from the interface!
+
 ## Verification
 
 After configuring, verify your setup:
@@ -193,7 +195,7 @@ After configuring, verify your setup:
 grep AI_PROVIDER .env
 grep GEMINI_API_KEY .env
 
-# Check if Ollama is configured
+# Check if Ollama is configured (local dev)
 grep OLLAMA_URL .env
 ```
 
@@ -205,16 +207,21 @@ grep OLLAMA_URL .env
 GEMINI_API_KEY=your_key_here
 ```
 
+### Issue: Rate limit errors with Gemini
+**Solution**: Add multiple API keys for round-robin rotation:
+```env
+GEMINI_API_KEY=key1
+GEMINI_API_KEY_1=key2
+GEMINI_API_KEY_2=key3
+```
+
 ### Issue: "Connection refused" (Ollama)
 **Solution**: Make sure Ollama is running:
 ```bash
 # Check if Ollama is running
 curl http://localhost:11434
 
-# Start Ollama (if using Docker)
-docker compose up -d ollama
-
-# Or start Ollama manually
+# Start Ollama manually
 ollama serve
 ```
 
@@ -241,6 +248,22 @@ The system checks environment variables in this order:
 - Use `.env.local` for local development
 - Use `.env.production` for production (keep secure)
 
+## Vercel Environment Variables
+
+When deploying to Vercel:
+
+1. Go to your project settings
+2. Navigate to "Environment Variables"
+3. Add these variables:
+   - `DATABASE_URL` (from Neon)
+   - `DIRECT_URL` (from Neon)
+   - `NEXTAUTH_SECRET` (generate a secure random string)
+   - `NEXTAUTH_URL` (your Vercel URL, e.g., https://yourapp.vercel.app)
+   - `AI_PROVIDER` (set to `GEMINI`)
+   - `GEMINI_API_KEY` (your primary key)
+   - `GEMINI_API_KEY_1`, `GEMINI_API_KEY_2`, etc. (additional keys for rotation)
+   - `GEMINI_MODEL` (optional, defaults to `gemini-2.5-flash`)
+
 ## Testing Your Configuration
 
 After setting up, test with:
@@ -252,4 +275,3 @@ bun run dev
 # Try generating questions or validating a question paper
 # The app will use the configured provider automatically
 ```
-
