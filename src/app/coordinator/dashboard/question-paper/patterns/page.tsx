@@ -36,16 +36,13 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
+// Pattern interface matches getPatterns return type
 interface Pattern {
     id: string;
     patternName: string;
     academicYear: string;
-    semester: string;
+    semesterType: string;
     examType: string;
-    partA_count: number;
-    partA_marksEach: number;
-    partB_count: number;
-    partB_marksEach: number;
     totalMarks: number;
     duration: number;
     status: string;
@@ -54,18 +51,24 @@ interface Pattern {
     coeApproved: boolean;
     createdAt: Date;
     course: {
+        id: string;
         course_code: string;
         name: string;
     };
+    instructions?: string | null;
     mcRemarks?: string | null;
     pcRemarks?: string | null;
     coeRemarks?: string | null;
+    partAStructure?: unknown;
+    partBStructure?: unknown;
 }
+
+type PatternStatus = "DRAFT" | "PENDING_MC_APPROVAL" | "PENDING_PC_APPROVAL" | "PENDING_COE_APPROVAL" | "APPROVED" | "REJECTED";
 
 export default function PatternsListPage() {
     const router = useRouter();
     const [selectedCourseId, setSelectedCourseId] = useState("");
-    const [selectedStatus, setSelectedStatus] = useState("");
+    const [selectedStatus, setSelectedStatus] = useState<PatternStatus | "">("");
     const [selectedPattern, setSelectedPattern] = useState<Pattern | null>(null);
     const [showDetailsDialog, setShowDetailsDialog] = useState(false);
 
@@ -74,10 +77,11 @@ export default function PatternsListPage() {
     const courses = coursesData || [];
 
     // Get patterns
-    const { data: patterns, isLoading } = trpc.pattern.getPatterns.useQuery({
+    const { data: patternsData, isLoading } = trpc.pattern.getPatterns.useQuery({
         courseId: selectedCourseId || undefined,
-        status: selectedStatus || undefined,
+        status: selectedStatus ? selectedStatus as PatternStatus : undefined,
     });
+    const patterns = patternsData?.patterns || [];
 
     const getStatusBadge = (status: string) => {
         if (status === "APPROVED") {
@@ -157,7 +161,7 @@ export default function PatternsListPage() {
 
                         <div className="space-y-2">
                             <Label htmlFor="statusFilter">Status</Label>
-                            <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+                            <Select value={selectedStatus} onValueChange={(value) => setSelectedStatus(value as PatternStatus | "")}>
                                 <SelectTrigger id="statusFilter">
                                     <SelectValue placeholder="All statuses" />
                                 </SelectTrigger>
@@ -176,7 +180,7 @@ export default function PatternsListPage() {
             </Card>
 
             {/* Patterns List */}
-            {!patterns || patterns.length === 0 ? (
+            {patterns.length === 0 ? (
                 <Card>
                     <CardContent className="py-12 text-center">
                         <p className="text-muted-foreground mb-4">No patterns found</p>
@@ -210,7 +214,7 @@ export default function PatternsListPage() {
                                     </div>
                                     <div>
                                         <p className="text-sm text-muted-foreground">Semester</p>
-                                        <p className="font-medium">Semester {pattern.semester}</p>
+                                        <p className="font-medium">{pattern.semesterType}</p>
                                     </div>
                                     <div>
                                         <p className="text-sm text-muted-foreground">Exam Type</p>
@@ -328,7 +332,7 @@ export default function PatternsListPage() {
                                 </div>
                                 <div>
                                     <Label>Semester</Label>
-                                    <p className="text-sm">Semester {selectedPattern.semester}</p>
+                                    <p className="text-sm">{selectedPattern.semesterType}</p>
                                 </div>
                                 <div>
                                     <Label>Exam Type</Label>
@@ -342,22 +346,12 @@ export default function PatternsListPage() {
 
                             <div>
                                 <Label>Part A Configuration</Label>
-                                <p className="text-sm">
-                                    {selectedPattern.partA_count} questions ×{" "}
-                                    {selectedPattern.partA_marksEach} marks ={" "}
-                                    {selectedPattern.partA_count * selectedPattern.partA_marksEach}{" "}
-                                    marks
-                                </p>
+                                <p className="text-sm">Configured via pattern structure</p>
                             </div>
 
                             <div>
                                 <Label>Part B Configuration</Label>
-                                <p className="text-sm">
-                                    {selectedPattern.partB_count} questions ×{" "}
-                                    {selectedPattern.partB_marksEach} marks ={" "}
-                                    {selectedPattern.partB_count * selectedPattern.partB_marksEach}{" "}
-                                    marks
-                                </p>
+                                <p className="text-sm">Configured via pattern structure</p>
                             </div>
 
                             <div>

@@ -115,7 +115,6 @@ export async function generateAIText(
     prompt,
     temperature: options?.temperature ?? 0.7,
     topP: options?.topP ?? 0.9,
-    maxTokens: options?.maxTokens ?? 1000,
   });
 
   logger.debug("AIService", "Generated text response", {

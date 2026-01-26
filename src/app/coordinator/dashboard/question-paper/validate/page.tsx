@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -70,18 +70,18 @@ export default function ValidateQuestionPaperPage() {
     // tRPC queries
     const { data: courses = [], isLoading: coursesLoading } = trpc.coordinator.getCoursesForMaterialUpload.useQuery();
     
-    // Check syllabus existence
-    const checkSyllabusMutation = trpc.coordinator.checkSyllabusExists.useMutation({
-        onSuccess: (data) => {
-            setSyllabusCheck({ exists: data.exists, checked: true });
-            if (!data.exists) {
-                toast.warning("Syllabus not found. Please upload the syllabus first.");
-            }
-        },
-        onError: (error) => {
-            toast.error(error.message || "Failed to check syllabus");
-        },
-    });
+    // Check syllabus existence - use query with enabled flag
+    const { data: syllabusData, isLoading: syllabusLoading, refetch: checkSyllabus, isError: syllabusError } = trpc.coordinator.checkSyllabusExists.useQuery(
+        { courseId: selectedCourse },
+        { enabled: !!selectedCourse }
+    );
+    
+    // Sync syllabus check state with query data
+    useEffect(() => {
+        if (syllabusData) {
+            setSyllabusCheck({ exists: syllabusData.exists, checked: true });
+        }
+    }, [syllabusData]);
 
     // Validate question paper
     const validateMutation = trpc.coordinator.validateQuestionPaper.useMutation({
@@ -111,25 +111,15 @@ export default function ValidateQuestionPaperPage() {
         setValidationResult(null);
 
         try {
-            // Check syllabus first - wait for result
-            const syllabusCheckResult = await new Promise<{ exists: boolean }>((resolve) => {
-                checkSyllabusMutation.mutate(
-                    { courseId: selectedCourse },
-                    {
-                        onSuccess: (data) => {
-                            resolve({ exists: data.exists });
-                        },
-                        onError: () => {
-                            resolve({ exists: false });
-                        },
-                    }
-                );
-            });
-            
-            if (!syllabusCheckResult.exists) {
-                toast.error("Please upload the syllabus first before validating question papers.");
-                setUploading(false);
-                return;
+            // Check syllabus first using cached query data or refetch
+            if (!syllabusData?.exists) {
+                // Refetch to ensure latest data
+                const { data: freshSyllabusData } = await checkSyllabus();
+                if (!freshSyllabusData?.exists) {
+                    toast.error("Please upload the syllabus first before validating question papers.");
+                    setUploading(false);
+                    return;
+                }
             }
 
             // Upload file
@@ -161,7 +151,7 @@ export default function ValidateQuestionPaperPage() {
             setUploading(false);
             setValidating(false);
         }
-    }, [selectedCourse, checkSyllabusMutation, validateMutation]);
+    }, [selectedCourse, syllabusData, checkSyllabus, validateMutation, selectedProvider]);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop: (acceptedFiles) => {
@@ -185,11 +175,7 @@ export default function ValidateQuestionPaperPage() {
         setSelectedCourse(courseId);
         setValidationResult(null);
         setSyllabusCheck({ exists: false, checked: false });
-        
-        // Check syllabus when course is selected
-        if (courseId) {
-            checkSyllabusMutation.mutate({ courseId });
-        }
+        // Syllabus check query will automatically refetch when selectedCourse changes
     };
 
     return (

@@ -142,19 +142,7 @@ export default function CoeDashboardPage() {
                         </div>
                     ) : papers && papers.length > 0 ? (
                         <div className="space-y-3">
-                            {papers.slice(0, 5).map((paper: {
-                                id: string;
-                                paperCode: string;
-                                isFinalized: boolean;
-                                generatedAt: Date;
-                                pattern: {
-                                    patternName: string;
-                                    course: {
-                                        course_code: string;
-                                        name: string;
-                                    };
-                                };
-                            }) => (
+                            {papers.slice(0, 5).map((paper) => (
                                 <div
                                     key={paper.id}
                                     className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
@@ -172,7 +160,7 @@ export default function CoeDashboardPage() {
                                     </div>
                                     <div className="flex items-center gap-4">
                                         <span className="text-sm text-muted-foreground">
-                                            {new Date(paper.generatedAt).toLocaleDateString()}
+                                            {paper.generatedAt ? new Date(paper.generatedAt).toLocaleDateString() : "N/A"}
                                         </span>
                                         {paper.isFinalized ? (
                                             <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100">

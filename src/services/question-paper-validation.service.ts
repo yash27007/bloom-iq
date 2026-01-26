@@ -118,7 +118,7 @@ Return ONLY the JSON array, no other text.`;
       return JSON.parse(jsonMatch[0]);
     }
   } catch (error) {
-    logger.error("QuestionPaperValidation", "AI extraction error", error);
+    logger.error("QuestionPaperValidation", "AI extraction error", error instanceof Error ? error : new Error(String(error)));
   }
   
   return [];
@@ -288,7 +288,7 @@ Return ONLY the JSON array, no other text.`;
       return JSON.parse(jsonMatch[0]);
     }
   } catch (error) {
-    logger.error("QuestionPaperValidation", "AI analysis error", error);
+    logger.error("QuestionPaperValidation", "AI analysis error", error instanceof Error ? error : new Error(String(error)));
   }
   
   return [];

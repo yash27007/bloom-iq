@@ -58,11 +58,7 @@ export async function generateQuestionsWithAI(
       return generateMockQuestions(params);
     }
 
-    throw new Error(
-      `Failed to generate questions: ${
-        error instanceof Error ? error.message : "Unknown error"
-      }`
-    );
+    throw new Error("Failed to generate questions: No questions returned from AI");
   } catch (error) {
     console.error("AI question generation error:", error);
 
