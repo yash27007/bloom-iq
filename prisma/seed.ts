@@ -264,6 +264,7 @@ async function main() {
         try {
           created = await prisma.user.create({
             data: {
+              name: `${firstName} ${lastName}`, // Better Auth required field
               firstName,
               lastName,
               email,

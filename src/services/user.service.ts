@@ -95,6 +95,7 @@ export class UserService {
     try {
       const user = await prisma.user.create({
         data: {
+          name: `${input.firstName} ${input.lastName}`, // Better Auth required field
           firstName: input.firstName,
           lastName: input.lastName,
           facultyId: input.facultyId,

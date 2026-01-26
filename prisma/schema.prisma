@@ -8,27 +8,90 @@ datasource db {
   url       = env("DATABASE_URL")
 }
 
+// ============================================
+// BETTER AUTH CORE MODELS
+// ============================================
+
 model User {
   id                        String                    @id @default(uuid())
+  // Better Auth required fields
+  name                      String
+  email                     String                    @unique
+  emailVerified             Boolean                   @default(false)
+  image                     String?
+  // Custom fields for BloomIQ
   firstName                 String
   lastName                  String
   facultyId                 String                    @unique
-  password                  String
-  email                     String                    @unique
+  password                  String?                   // Optional for social auth
   designation               Designation
   role                      Role
   isActive                  Boolean                   @default(true)
+  // Timestamps
   createdAt                 DateTime                  @default(now())
   updatedAt                 DateTime                  @updatedAt
+  // Relations
   Course_Material           Course_Material[]
   courseCoordinatorCourses  Course[]                  @relation("CourseCoordinator")
   moduleCoordinatorCourses  Course[]                  @relation("ModuleCoordinator")
   programCoordinatorCourses Course[]                  @relation("ProgramCoordinator")
   initiatedJobs             Question_Generation_Job[] @relation("InitiatedBy")
-  chatHistory                Chat_History[]            @relation("UserChatHistory")
+  chatHistory               Chat_History[]            @relation("UserChatHistory")
+  // Better Auth relations
+  sessions                  Session[]
+  accounts                  Account[]
 
   @@index([email, facultyId])
-  @@map("users")
+  @@map("user")
+}
+
+/// Better Auth Session model
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+/// Better Auth Account model (for OAuth providers)
+model Account {
+  id                    String    @id @default(uuid())
+  userId                String
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  idToken               String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account")
+}
+
+/// Better Auth Verification model (for email verification, password reset, etc.)
+model Verification {
+  id         String   @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("verification")
 }
 
 model Course {
