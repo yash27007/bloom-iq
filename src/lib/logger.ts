@@ -1,14 +1,9 @@
 /**
  * Logger Service
- *
- * Comprehensive logging system with automatic file rotation and cleanup
- * - In development: Logs to files in logs/ directory
- * - In production (Vercel/serverless): Logs to console only (read-only filesystem)
+ * 
+ * Simple console-based logging for serverless environments.
+ * File logging removed for Vercel compatibility.
  */
-
-import { writeFile, mkdir, readdir, stat, unlink } from "fs/promises";
-import { join } from "path";
-import { existsSync } from "fs";
 
 export enum LogLevel {
   DEBUG = "DEBUG",
@@ -30,104 +25,7 @@ export interface LogEntry {
   };
 }
 
-// Check if we're in a serverless environment (Vercel, AWS Lambda, etc.)
-const isServerless = (): boolean => {
-  return !!(
-    process.env.VERCEL ||
-    process.env.AWS_LAMBDA_FUNCTION_NAME ||
-    process.env.NETLIFY ||
-    process.env.VERCEL_ENV
-  );
-};
-
 class Logger {
-  private logDir: string;
-  private currentLogFile: string;
-  private cleanupInterval: NodeJS.Timeout | null = null;
-  private readonly LOG_RETENTION_HOURS = 72;
-  private readonly canWriteFiles: boolean;
-
-  constructor() {
-    this.logDir = join(process.cwd(), "logs");
-    this.currentLogFile = this.getLogFileName();
-    
-    // Only enable file logging in non-serverless environments
-    this.canWriteFiles = !isServerless() && process.env.NODE_ENV !== "production";
-    
-    if (this.canWriteFiles) {
-      this.initFileLogging();
-    }
-  }
-
-  /**
-   * Initialize file logging (only in development)
-   */
-  private async initFileLogging(): Promise<void> {
-    try {
-      await this.ensureLogDirectory();
-      this.startAutoCleanup();
-    } catch (error) {
-      console.warn("[Logger] File logging disabled:", error);
-    }
-  }
-
-  /**
-   * Get log file name based on current date
-   */
-  private getLogFileName(): string {
-    const date = new Date();
-    const dateStr = date.toISOString().split("T")[0]; // YYYY-MM-DD
-    return join(this.logDir, `app-${dateStr}.log`);
-  }
-
-  /**
-   * Ensure logs directory exists
-   */
-  private async ensureLogDirectory(): Promise<void> {
-    if (!this.canWriteFiles) return;
-    
-    try {
-      if (!existsSync(this.logDir)) {
-        await mkdir(this.logDir, { recursive: true });
-      }
-    } catch (error) {
-      // Silently fail - we'll use console logging instead
-    }
-  }
-
-  /**
-   * Format log entry as JSON line
-   */
-  private formatLogEntry(
-    level: LogLevel,
-    service: string,
-    message: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    data?: any,
-    error?: Error
-  ): string {
-    const entry: LogEntry = {
-      timestamp: new Date().toISOString(),
-      level,
-      service,
-      message,
-    };
-
-    if (data !== undefined) {
-      entry.data = this.sanitizeData(data);
-    }
-
-    if (error) {
-      entry.error = {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-      };
-    }
-
-    return JSON.stringify(entry) + "\n";
-  }
-
   /**
    * Sanitize data to prevent circular references and large objects
    */
@@ -153,12 +51,12 @@ class Logger {
     }
 
     if (Array.isArray(data)) {
-      return data.slice(0, 100).map((item) => this.sanitizeData(item)); // Limit array size
+      return data.slice(0, 100).map((item) => this.sanitizeData(item));
     }
 
     if (typeof data === "object" && data !== null) {
       const sanitized: Record<string, unknown> = {};
-      const keys = Object.keys(data).slice(0, 50); // Limit object keys
+      const keys = Object.keys(data).slice(0, 50);
       for (const key of keys) {
         try {
           const value = (data as Record<string, unknown>)[key];
@@ -178,154 +76,26 @@ class Logger {
   }
 
   /**
-   * Log to console with appropriate formatting
-   */
-  private logToConsole(
-    level: LogLevel,
-    service: string,
-    message: string,
-    data?: unknown,
-    error?: Error
-  ): void {
-    const timestamp = new Date().toISOString();
-    const consoleMessage = `[${timestamp}] [${level}] [${service}] ${message}`;
-    
-    switch (level) {
-      case LogLevel.ERROR:
-        if (error) {
-          console.error(consoleMessage, data || "", error);
-        } else {
-          console.error(consoleMessage, data || "");
-        }
-        break;
-      case LogLevel.WARN:
-        console.warn(consoleMessage, data || "");
-        break;
-      case LogLevel.DEBUG:
-        // Only log debug in development
-        if (process.env.NODE_ENV === "development") {
-          console.debug(consoleMessage, data || "");
-        }
-        break;
-      default:
-        console.log(consoleMessage, data || "");
-    }
-  }
-
-  /**
-   * Write log entry to file (only in development)
-   */
-  private async writeLog(
-    level: LogLevel,
-    service: string,
-    message: string,
-    data?: unknown,
-    error?: Error
-  ): Promise<void> {
-    // Always log to console
-    this.logToConsole(level, service, message, data, error);
-
-    // Only write to file if enabled
-    if (!this.canWriteFiles) {
-      return;
-    }
-
-    try {
-      await this.ensureLogDirectory();
-
-      // Check if we need a new log file (new day)
-      const newLogFile = this.getLogFileName();
-      if (newLogFile !== this.currentLogFile) {
-        this.currentLogFile = newLogFile;
-      }
-
-      const logLine = this.formatLogEntry(level, service, message, data, error);
-      await writeFile(this.currentLogFile, logLine, { flag: "a" });
-    } catch (writeError) {
-      // Silently fail - console logging is already done
-    }
-  }
-
-  /**
-   * Clean up old log files (older than 72 hours)
-   */
-  private async cleanupOldLogs(): Promise<void> {
-    if (!this.canWriteFiles) return;
-
-    try {
-      if (!existsSync(this.logDir)) {
-        return;
-      }
-
-      const files = await readdir(this.logDir);
-      const now = Date.now();
-      const maxAge = this.LOG_RETENTION_HOURS * 60 * 60 * 1000; // 72 hours in milliseconds
-
-      for (const file of files) {
-        if (!file.endsWith(".log")) continue;
-
-        const filePath = join(this.logDir, file);
-        const stats = await stat(filePath);
-        const fileAge = now - stats.mtime.getTime();
-
-        if (fileAge > maxAge) {
-          await unlink(filePath);
-          console.log(
-            `[Logger] Deleted old log file: ${file} (${Math.round(
-              fileAge / (60 * 60 * 1000)
-            )} hours old)`
-          );
-        }
-      }
-    } catch (error) {
-      // Silently fail
-    }
-  }
-
-  /**
-   * Start automatic cleanup (runs every 6 hours)
-   */
-  private startAutoCleanup(): void {
-    if (!this.canWriteFiles) return;
-
-    // Run cleanup immediately
-    this.cleanupOldLogs();
-
-    // Then run every 6 hours
-    this.cleanupInterval = setInterval(() => {
-      this.cleanupOldLogs();
-    }, 6 * 60 * 60 * 1000); // 6 hours
-  }
-
-  /**
-   * Stop auto cleanup (useful for testing or shutdown)
-   */
-  public stopAutoCleanup(): void {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-      this.cleanupInterval = null;
-    }
-  }
-
-  /**
    * Log debug message
    */
   public debug(service: string, message: string, data?: unknown): void {
-    this.writeLog(LogLevel.DEBUG, service, message, data).catch(() => {});
+    if (process.env.NODE_ENV === "development") {
+      console.debug(`[DEBUG] [${service}] ${message}`, data ? this.sanitizeData(data) : "");
+    }
   }
 
   /**
    * Log info message
    */
   public info(service: string, message: string, data?: unknown): void {
-    this.writeLog(LogLevel.INFO, service, message, data).catch(() => {});
+    console.log(`[INFO] [${service}] ${message}`, data ? this.sanitizeData(data) : "");
   }
 
   /**
    * Log warning message
    */
   public warn(service: string, message: string, data?: unknown): void {
-    this.writeLog(LogLevel.WARN, service, message, data).catch(() => {});
+    console.warn(`[WARN] [${service}] ${message}`, data ? this.sanitizeData(data) : "");
   }
 
   /**
@@ -337,7 +107,11 @@ class Logger {
     error?: Error,
     data?: unknown
   ): void {
-    this.writeLog(LogLevel.ERROR, service, message, data, error).catch(() => {});
+    if (error) {
+      console.error(`[ERROR] [${service}] ${message}`, data ? this.sanitizeData(data) : "", error);
+    } else {
+      console.error(`[ERROR] [${service}] ${message}`, data ? this.sanitizeData(data) : "");
+    }
   }
 
   /**
@@ -354,7 +128,6 @@ class Logger {
       title,
       courseId,
       userId,
-      action: "UPLOAD",
     });
   }
 
@@ -372,7 +145,6 @@ class Logger {
       status,
       error,
       pageCount,
-      action: "PARSE",
     });
   }
 
@@ -385,15 +157,11 @@ class Logger {
     totalChunks: number,
     chunkTitle?: string
   ): void {
-    const progress =
-      totalChunks > 0 ? Math.round((currentChunk / totalChunks) * 100) : 0;
-    this.info("EmbeddingService", "Embedding progress", {
+    const progress = totalChunks > 0 ? Math.round((currentChunk / totalChunks) * 100) : 0;
+    this.debug("EmbeddingService", "Embedding progress", {
       materialId,
-      currentChunk,
-      totalChunks,
       progress: `${progress}%`,
       chunkTitle,
-      action: "EMBED_PROGRESS",
     });
   }
 
@@ -409,7 +177,6 @@ class Logger {
       materialId,
       totalChunks,
       duration: duration ? `${duration}ms` : undefined,
-      action: "EMBED_COMPLETE",
     });
   }
 
@@ -428,15 +195,12 @@ class Logger {
         materialId,
         courseId,
         questionCount,
-        action: "GENERATE_QUESTIONS",
       });
     } else {
       this.error("QuestionGenerator", "Question generation failed", undefined, {
         materialId,
         courseId,
-        questionCount,
         error,
-        action: "GENERATE_QUESTIONS_FAILED",
       });
     }
   }
@@ -450,12 +214,11 @@ class Logger {
     role: "user" | "assistant",
     messageLength: number
   ): void {
-    this.info("ChatService", "Chat message", {
+    this.debug("ChatService", "Chat message", {
       materialId,
       userId,
       role,
       messageLength,
-      action: "CHAT",
     });
   }
 
@@ -469,13 +232,12 @@ class Logger {
     duration?: number,
     userId?: string
   ): void {
-    this.info("API", "Request processed", {
+    this.debug("API", "Request processed", {
       method,
       path,
       statusCode,
       duration: duration ? `${duration}ms` : undefined,
       userId,
-      action: "API_REQUEST",
     });
   }
 
@@ -494,17 +256,18 @@ class Logger {
         operation,
         table,
         duration: duration ? `${duration}ms` : undefined,
-        action: "DB_OPERATION",
       });
     } else {
       this.error("Database", "Database operation failed", undefined, {
         operation,
         table,
         error,
-        action: "DB_OPERATION_FAILED",
       });
     }
   }
+
+  // No-op for compatibility
+  public stopAutoCleanup(): void {}
 }
 
 // Export singleton instance
