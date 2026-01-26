@@ -1,5 +1,55 @@
 # Environment Variables Setup Guide
 
+## 🚀 Quick Start for Vercel Deployment
+
+### 1. Database Setup (Neon - Recommended)
+
+1. Go to [neon.tech](https://neon.tech) and create a free account
+2. Create a new project
+3. Copy your connection string and update:
+
+```env
+DATABASE_URL=postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/bloom_iq?sslmode=require
+DIRECT_URL=postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/bloom_iq?sslmode=require
+```
+
+### 2. AI Provider (Gemini - Recommended for Vercel)
+
+```env
+AI_PROVIDER=GEMINI
+GEMINI_API_KEY=your_api_key_here
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+### 3. Authentication
+
+```env
+NEXTAUTH_SECRET=generate-a-random-32-char-string
+NEXTAUTH_URL=https://your-app.vercel.app
+```
+
+> **Note**: ChromaDB (vector search) requires a hosted solution for Vercel. For MVP, you can skip it - the app will still work but without semantic search.
+
+---
+
+## 🖥️ Local Development Setup
+
+### Option A: Using Neon DB (Easiest)
+Just use your Neon DB connection string locally too.
+
+### Option B: Using Docker (Full Local Stack)
+
+```bash
+# Start PostgreSQL and ChromaDB
+docker compose -f docker-compose.dev.yml up -d
+
+# Then use these in .env:
+DATABASE_URL=postgresql://bloom_user:bloom_password@localhost:5432/bloom_iq
+CHROMA_URL=http://localhost:8000
+```
+
+---
+
 ## Quick Configuration for Gemini
 
 To use Gemini, update your `.env` file with these settings:

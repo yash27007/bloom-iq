@@ -1,0 +1,39 @@
+# Development Docker Compose - PostgreSQL & ChromaDB only
+# Usage: docker compose -f docker-compose.dev.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bloom-iq-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bloom_user
+      POSTGRES_PASSWORD: bloom_password
+      POSTGRES_DB: bloom_iq
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bloom_user -d bloom_iq"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: bloom-iq-chromadb
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+
+volumes:
+  postgres_data:
+    driver: local
+  chroma_data:
+    driver: local

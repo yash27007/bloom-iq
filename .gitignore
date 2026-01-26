@@ -57,4 +57,4 @@ credentials.json
 # Logs
 /logs/
 logs/
-*.log
+*.logenv.txt
