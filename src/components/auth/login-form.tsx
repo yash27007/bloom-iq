@@ -18,7 +18,7 @@ import { FormError } from "@/components/auth/form-error"
 import { FormSuccess } from "@/components/auth/form-success"
 import { useRouter } from "next/navigation"
 import { Eye, EyeOff, Loader2 } from "lucide-react"
-import { signIn } from "next-auth/react"
+import { signIn } from "@/lib/auth-client"
 import { getDashboardRoute, type UserRole } from "@/lib/auth-utils"
 
 export const LoginForm = () => {
@@ -42,36 +42,32 @@ export const LoginForm = () => {
         setIsLoading(true);
 
         try {
-            const result = await signIn("credentials", {
+            const result = await signIn.email({
                 email: values.email,
                 password: values.password,
-                redirect: false,
             });
 
-            if (result?.ok && !result?.error) {
+            if (result.error) {
+                // Check for account deactivation
+                if (result.error.message?.includes("deactivated")) {
+                    router.push("/unauthorized");
+                    return;
+                }
+                setError("Invalid email or password. Please check your credentials and try again.");
+                return;
+            }
+
+            if (result.data?.user) {
                 setSuccess("Login successful! Redirecting...");
-
-                // Get user data from session to determine redirect
-                const response = await fetch('/api/auth/session');
-                const session = await response.json();
-
-                if (session?.user?.role) {
-                    const userRole = session.user.role as UserRole;
+                
+                // Get user role and redirect to appropriate dashboard
+                const userRole = (result.data.user as { role?: string }).role as UserRole | undefined;
+                if (userRole) {
                     const dashboardRoute = getDashboardRoute(userRole);
                     router.push(dashboardRoute);
                 } else {
                     router.push("/dashboard");
                 }
-            } else {
-                // Check if the error is due to account deactivation
-                if (result?.error && result.error.includes("ACCOUNT_DEACTIVATED")) {
-                    // Redirect to unauthorized page for deactivated accounts
-                    router.push("/unauthorized");
-                    return;
-                }
-
-                // Handle other authentication failures
-                setError("Invalid email or password. Please check your credentials and try again.");
             }
         } catch (error) {
             console.error("Login error:", error);

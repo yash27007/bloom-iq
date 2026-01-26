@@ -1,8 +1,9 @@
-import { auth } from "@/auth";
+import { getSession } from "@/lib/auth";
+import { headers } from "next/headers";
 import { ThemeToggle } from "./theme-toggle";
 
 export const Navbar = async () => {
-    const _session = await auth();
+    const _session = await getSession(await headers());
 
     return (
         <nav className="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/60">

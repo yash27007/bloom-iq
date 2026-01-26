@@ -1,12 +1,13 @@
 import { SidebarProvider } from "@/components/ui/sidebar";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { Metadata } from "next";
 import { ReactNode } from "react";
 import { AdminDashboardSidebar } from "./_components/AdminDashboardSidebar";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
+
 export const metadata: Metadata = {
     title: "Admin Dashboard | Bloom IQ",
     description: "Proprietary college software for generating question papers using AI and Bloom's Taxonomy",
@@ -21,7 +22,7 @@ export const metadata: Metadata = {
 
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-    const session = await auth();
+    const session = await getSession(await headers());
 
     if (!session?.user) {
         redirect("/sign-in");

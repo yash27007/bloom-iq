@@ -1,8 +1,10 @@
 "use client";
 
-import { signOut } from "next-auth/react";
+import { signOut } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
-import { LogOut } from "lucide-react";
+import { LogOut, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 interface LogoutButtonProps {
   variant?: "default" | "outline" | "ghost";
@@ -15,11 +17,26 @@ export function LogoutButton({
   size = "default", 
   className = "" 
 }: LogoutButtonProps) {
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+
   const handleLogout = async () => {
-    await signOut({
-      callbackUrl: "/sign-in",
-      redirect: true,
-    });
+    setIsLoading(true);
+    try {
+      await signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            router.push("/sign-in");
+          },
+        },
+      });
+    } catch (error) {
+      console.error("Logout error:", error);
+      // Still redirect on error
+      router.push("/sign-in");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -28,8 +45,13 @@ export function LogoutButton({
       variant={variant}
       size={size}
       className={`${className}`}
+      disabled={isLoading}
     >
-      <LogOut className="w-4 h-4 mr-2" />
+      {isLoading ? (
+        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+      ) : (
+        <LogOut className="w-4 h-4 mr-2" />
+      )}
       Sign Out
     </Button>
   );
