@@ -69,9 +69,15 @@ export const LoginForm = () => {
                     router.push("/dashboard");
                 }
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error("Login error:", error);
-            setError("An unexpected error occurred. Please try again later.");
+            // Show more detailed error in development
+            const errorMessage = error?.message || error?.toString() || "Unknown error";
+            if (process.env.NODE_ENV === "development") {
+                setError(`Error: ${errorMessage}`);
+            } else {
+                setError("An unexpected error occurred. Please try again later.");
+            }
         } finally {
             setIsLoading(false);
         }
