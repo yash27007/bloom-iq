@@ -1,11 +1,18 @@
-# Development Docker Compose - PostgreSQL & ChromaDB only
-# Usage: docker compose -f docker-compose.dev.yml up -d
+# Development Docker Compose - PostgreSQL & ChromaDB
+# 
+# Usage:
+#   Start:  docker compose -f docker-compose.dev.yml up -d
+#   Stop:   docker compose -f docker-compose.dev.yml down
+#   Logs:   docker compose -f docker-compose.dev.yml logs -f
+#
+# Note: Containers will NOT auto-start when Docker opens.
+#       You must manually run 'up' command each time.
 
 services:
   postgres:
     image: postgres:16-alpine
     container_name: bloom-iq-postgres
-    restart: unless-stopped
+    # No restart policy = won't auto-start
     environment:
       POSTGRES_USER: bloom_user
       POSTGRES_PASSWORD: bloom_password
@@ -13,7 +20,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - bloom_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bloom_user -d bloom_iq"]
       interval: 10s
@@ -23,17 +30,17 @@ services:
   chromadb:
     image: chromadb/chroma:latest
     container_name: bloom-iq-chromadb
-    restart: unless-stopped
+    # No restart policy = won't auto-start
     ports:
       - "8000:8000"
     volumes:
-      - chroma_data:/chroma/chroma
+      - bloom_chroma_data:/chroma/chroma
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
 
 volumes:
-  postgres_data:
+  bloom_postgres_data:
     driver: local
-  chroma_data:
+  bloom_chroma_data:
     driver: local
