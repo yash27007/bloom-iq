@@ -46,12 +46,12 @@ interface Paper {
     setVariant: string;
     status: string;
     isFinalized: boolean;
-    generatedAt: Date;
+    generatedAt: Date | null;
     finalizedAt: Date | null;
     pattern: {
         patternName: string;
         academicYear: string;
-        semester: string;
+        semesterType: string;
         examType: string;
         totalMarks: number;
         course: {
@@ -61,10 +61,12 @@ interface Paper {
     };
 }
 
+type PaperStatus = "DRAFT" | "GENERATED" | "FINALIZED";
+
 export default function ViewPapersPage() {
     const router = useRouter();
     const [courseFilter, setCourseFilter] = useState<string>("");
-    const [statusFilter, setStatusFilter] = useState<string>("");
+    const [statusFilter, setStatusFilter] = useState<PaperStatus | "">("");
     const [paperToDelete, setPaperToDelete] = useState<string | null>(null);
 
     const utils = trpc.useUtils();
@@ -72,7 +74,7 @@ export default function ViewPapersPage() {
     // Get papers
     const { data: papers, isLoading } = trpc.paper.getPapers.useQuery({
         courseId: courseFilter || undefined,
-        status: statusFilter || undefined,
+        status: statusFilter ? statusFilter as PaperStatus : undefined,
     });
 
     // Get courses (for filter)
@@ -172,7 +174,7 @@ export default function ViewPapersPage() {
 
                         <div className="space-y-2">
                             <Label htmlFor="statusFilter">Status</Label>
-                            <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as PaperStatus | "")}>
                                 <SelectTrigger id="statusFilter">
                                     <SelectValue placeholder="All statuses" />
                                 </SelectTrigger>
@@ -231,7 +233,7 @@ export default function ViewPapersPage() {
                                     </div>
                                     <div>
                                         <p className="text-sm text-muted-foreground">Semester</p>
-                                        <p className="font-medium">Semester {paper.pattern.semester}</p>
+                                        <p className="font-medium">{paper.pattern.semesterType}</p>
                                     </div>
                                     <div>
                                         <p className="text-sm text-muted-foreground">Set Variant</p>
@@ -251,7 +253,7 @@ export default function ViewPapersPage() {
                                     <div>
                                         <p className="text-sm text-muted-foreground">Generated</p>
                                         <p className="font-medium">
-                                            {new Date(paper.generatedAt).toLocaleDateString()}
+                                            {paper.generatedAt ? new Date(paper.generatedAt).toLocaleDateString() : "N/A"}
                                         </p>
                                     </div>
                                 </div>

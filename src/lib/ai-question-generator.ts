@@ -5,7 +5,13 @@
  * Supports Ollama and can be extended to support OpenAI, Anthropic, etc.
  */
 
-import { aiService } from "@/services/ai";
+import {
+  generateQuestions,
+  getProviderName,
+  listAvailableModels as listAIModels,
+  switchAIModel as switchAIModelService,
+  testAIConnection as testAIConnectionService,
+} from "@/services/ai";
 import type {
   QuestionGenerationParams,
   GeneratedQuestion,
@@ -21,28 +27,44 @@ export type { QuestionGenerationParams, GeneratedQuestion };
  * based on the configuration (currently Ollama)
  *
  * @param params - Question generation parameters (counts, Bloom's levels, material content)
+ * @param model - Optional model name to use (defaults to configured model)
  * @returns Array of generated questions with answers
  * @throws Error if generation fails and not in development mode
  */
 export async function generateQuestionsWithAI(
-  params: QuestionGenerationParams
+  params: QuestionGenerationParams,
+  model?: string,
+  provider?: "GEMINI" | "OLLAMA"
 ): Promise<GeneratedQuestion[]> {
   try {
     console.log(
-      `Generating questions using ${aiService.getProviderName()} provider`
+      `Generating questions using ${getProviderName(
+        provider
+      )} provider${model ? ` with model ${model}` : ""}`
     );
 
-    const questions = await aiService.generateQuestions(params);
+    const questions = await generateQuestions(params, model, provider);
 
     console.log(`Successfully generated ${questions.length} questions`);
 
-    return questions;
+    // If we got some questions (even if not all requested), return them
+    if (questions.length > 0) {
+      return questions;
+    }
+
+    // Only fallback to mocks if we got zero questions
+    console.warn("No questions generated, falling back to mock questions");
+    if (process.env.NODE_ENV === "development") {
+      return generateMockQuestions(params);
+    }
+
+    throw new Error("Failed to generate questions: No questions returned from AI");
   } catch (error) {
     console.error("AI question generation error:", error);
 
-    // Fallback to mock questions in development
+    // Fallback to mock questions in development only if we got zero questions
     if (process.env.NODE_ENV === "development") {
-      console.warn("Falling back to mock questions");
+      console.warn("Falling back to mock questions due to error");
       return generateMockQuestions(params);
     }
 
@@ -129,7 +151,7 @@ function generateMockQuestions(
  * @returns True if connection successful, false otherwise
  */
 export async function testAIConnection(): Promise<boolean> {
-  return aiService.testConnection();
+  return testAIConnectionService();
 }
 
 /**
@@ -138,7 +160,7 @@ export async function testAIConnection(): Promise<boolean> {
  * @returns Array of available model names
  */
 export async function listAvailableModels(): Promise<string[]> {
-  return aiService.listAvailableModels();
+  return listAIModels();
 }
 
 /**
@@ -147,5 +169,5 @@ export async function listAvailableModels(): Promise<string[]> {
  * @param model - Model name to switch to
  */
 export function switchAIModel(model: string): void {
-  aiService.switchModel(model);
+  switchAIModelService(model);
 }

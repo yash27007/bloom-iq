@@ -1,8 +1,12 @@
 "use server";
-import { signIn, signOut } from "@/auth";
-import { AuthError } from "next-auth";
-import { redirect } from "next/navigation";
 
+import { auth } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { headers } from "next/headers";
+
+/**
+ * Server action to sign in with email and password
+ */
 export const login = async (formData: FormData) => {
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
@@ -14,42 +18,63 @@ export const login = async (formData: FormData) => {
   }
 
   try {
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
+    await auth.api.signInEmail({
+      body: {
+        email,
+        password,
+      },
     });
-
-    if (result?.error) {
-      return {
-        error: "Invalid credentials",
-      };
-    }
 
     return {
       success: true,
     };
   } catch (error) {
-    if (error instanceof AuthError) {
-      switch (error.type) {
-        case "CredentialsSignin":
-          return {
-            error: "Invalid credentials",
-          };
-        default:
-          return {
-            error: "Something went wrong",
-          };
+    console.error("Login error:", error);
+    
+    if (error instanceof Error) {
+      if (error.message.includes("deactivated")) {
+        return {
+          error: "Account has been deactivated. Please contact administrator.",
+          deactivated: true,
+        };
+      }
+      if (error.message.includes("Invalid") || error.message.includes("credentials")) {
+        return {
+          error: "Invalid email or password",
+        };
       }
     }
-
+    
     return {
       error: "An unexpected error occurred",
     };
   }
 };
 
+/**
+ * Server action to sign out
+ */
 export const logout = async () => {
-  await signOut();
-  redirect("/");
+  try {
+    await auth.api.signOut({
+      headers: await headers(),
+    });
+  } catch (error) {
+    console.error("Logout error:", error);
+  }
+  redirect("/sign-in");
+};
+
+/**
+ * Get current session on the server
+ */
+export const getServerSession = async () => {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+    return session;
+  } catch {
+    return null;
+  }
 };

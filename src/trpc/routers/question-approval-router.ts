@@ -333,7 +333,7 @@ export const questionApprovalRouter = createTRPCRouter({
    */
   getQuestionsForReview: coordinatorProcedure
     .input(getQuestionsForReviewSchema)
-    .query(async ({ input, ctx }) => {
+    .query(async ({ input, ctx: _ctx }) => {
       try {
         const result = await QuestionService.getQuestionsByCourse(
           input.courseId,
@@ -427,7 +427,7 @@ export const questionApprovalRouter = createTRPCRouter({
           success: true,
           data: feedback,
         };
-      } catch (error) {
+      } catch (_error) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: "Failed to fetch question feedback.",
@@ -488,7 +488,7 @@ export const questionApprovalRouter = createTRPCRouter({
             rejected,
           },
         };
-      } catch (error) {
+      } catch (_error) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: "Failed to fetch question statistics.",

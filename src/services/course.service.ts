@@ -541,7 +541,7 @@ export class CourseService {
       return {
         message: `Successfully deleted ${result.count} course(s).`,
       };
-    } catch (error) {
+    } catch (_error) {
       throw new Error("Failed to delete courses.");
     }
   }

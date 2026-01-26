@@ -1,0 +1,35 @@
+# Development Docker Compose - PostgreSQL only
+# 
+# Usage:
+#   Start:  docker compose -f docker-compose.dev.yml up -d
+#   Stop:   docker compose -f docker-compose.dev.yml down
+#   Logs:   docker compose -f docker-compose.dev.yml logs -f
+#
+# Note: Containers will NOT auto-start when Docker opens.
+#       You must manually run 'up' command each time.
+#
+# Vector embeddings are stored directly in PostgreSQL (no ChromaDB needed).
+# For production, use Neon DB which supports pgvector.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bloom-iq-postgres
+    # No restart policy = won't auto-start
+    environment:
+      POSTGRES_USER: bloom_user
+      POSTGRES_PASSWORD: bloom_password
+      POSTGRES_DB: bloom_iq
+    ports:
+      - "5432:5432"
+    volumes:
+      - bloom_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bloom_user -d bloom_iq"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  bloom_postgres_data:
+    driver: local

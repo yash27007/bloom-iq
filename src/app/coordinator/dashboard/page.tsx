@@ -1,7 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { BookOpen, Users, Mail, IdCard } from "lucide-react";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/auth";
+import { headers } from "next/headers";
 import { createCaller } from "@/trpc/server";
 import { redirect } from "next/navigation";
 
@@ -10,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export default async function CoordinatorDashboardPage() {
-    const session = await auth();
+    const session = await getSession(await headers());
 
     if (!session?.user?.email) {
         redirect("/sign-in");

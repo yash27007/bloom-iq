@@ -24,27 +24,32 @@ import { Label } from "@/components/ui/label";
 import { CheckCircle, XCircle, Eye, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
+// Pattern interface for type checking - matches getPendingApprovals return
 interface Pattern {
     id: string;
     patternName: string;
     academicYear: string;
-    semester: string;
+    semesterType: string;
     examType: string;
-    partA_count: number;
-    partA_marksEach: number;
-    partB_count: number;
-    partB_marksEach: number;
     totalMarks: number;
     duration: number;
-    instructions: string;
+    instructions: string | null;
     status: string;
     mcApproved: boolean;
     pcApproved: boolean;
     coeApproved: boolean;
     createdAt: Date;
+    partAStructure: unknown;
+    partBStructure: unknown;
     course: {
+        id: string;
         course_code: string;
         name: string;
+        courseCoordinator: {
+            firstName: string;
+            lastName: string;
+            email: string;
+        };
     };
 }
 
@@ -58,7 +63,8 @@ export default function ApprovePatterns() {
     const utils = trpc.useUtils();
 
     // Get pending approvals
-    const { data: patterns, isLoading } = trpc.pattern.getPendingApprovals.useQuery();
+    const { data: patternsData, isLoading } = trpc.pattern.getPendingApprovals.useQuery();
+    const patterns = patternsData?.patterns || [];
 
     // Approve mutation
     const approveMutation = trpc.pattern.approvePattern.useMutation({
@@ -138,7 +144,7 @@ export default function ApprovePatterns() {
             </div>
 
             {/* Patterns List */}
-            {!patterns || patterns.length === 0 ? (
+            {patterns.length === 0 ? (
                 <Card>
                     <CardContent className="py-12 text-center">
                         <p className="text-muted-foreground">
@@ -172,7 +178,7 @@ export default function ApprovePatterns() {
                                     </div>
                                     <div>
                                         <p className="text-sm text-muted-foreground">Semester</p>
-                                        <p className="font-medium">Semester {pattern.semester}</p>
+                                        <p className="font-medium">{pattern.semesterType}</p>
                                     </div>
                                     <div>
                                         <p className="text-sm text-muted-foreground">Exam Type</p>
@@ -186,20 +192,16 @@ export default function ApprovePatterns() {
 
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4 p-4 bg-muted rounded-lg">
                                     <div>
-                                        <p className="text-sm text-muted-foreground">Part A</p>
-                                        <p className="font-medium">
-                                            {pattern.partA_count} × {pattern.partA_marksEach} marks
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <p className="text-sm text-muted-foreground">Part B</p>
-                                        <p className="font-medium">
-                                            {pattern.partB_count} × {pattern.partB_marksEach} marks
-                                        </p>
-                                    </div>
-                                    <div>
                                         <p className="text-sm text-muted-foreground">Total Marks</p>
                                         <p className="font-medium text-lg">{pattern.totalMarks}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-muted-foreground">Duration</p>
+                                        <p className="font-medium">{pattern.duration} mins</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-muted-foreground">Sections</p>
+                                        <p className="font-medium">Part A + Part B</p>
                                     </div>
                                 </div>
 
@@ -305,7 +307,7 @@ export default function ApprovePatterns() {
                                 </div>
                                 <div>
                                     <Label>Semester</Label>
-                                    <p className="text-sm">Semester {selectedPattern.semester}</p>
+                                    <p className="text-sm">{selectedPattern.semesterType}</p>
                                 </div>
                                 <div>
                                     <Label>Exam Type</Label>
@@ -324,20 +326,14 @@ export default function ApprovePatterns() {
                             <div>
                                 <Label>Part A Configuration</Label>
                                 <p className="text-sm">
-                                    {selectedPattern.partA_count} questions ×{" "}
-                                    {selectedPattern.partA_marksEach} marks ={" "}
-                                    {selectedPattern.partA_count * selectedPattern.partA_marksEach}{" "}
-                                    marks
+                                    Configured via pattern structure
                                 </p>
                             </div>
 
                             <div>
                                 <Label>Part B Configuration</Label>
                                 <p className="text-sm">
-                                    {selectedPattern.partB_count} questions ×{" "}
-                                    {selectedPattern.partB_marksEach} marks ={" "}
-                                    {selectedPattern.partB_count * selectedPattern.partB_marksEach}{" "}
-                                    marks
+                                    Configured via pattern structure
                                 </p>
                             </div>
 

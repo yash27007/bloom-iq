@@ -1,6 +1,7 @@
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { CoeDashboardSidebar } from "./_components/coe-dashboard-sidebar";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/auth";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 export default async function CoeDashboardLayout({
@@ -8,7 +9,7 @@ export default async function CoeDashboardLayout({
 }: {
     children: React.ReactNode;
 }) {
-    const session = await auth();
+    const session = await getSession(await headers());
 
     // Check if user is authenticated
     if (!session?.user) {

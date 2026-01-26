@@ -264,6 +264,7 @@ export function exportQuestionsToPDF(
                         <span class="badge badge-type">${q.generationType}</span>
                     `
                         : ""
+
                     }
                     ${q.unit ? `<span class="badge">Unit ${q.unit}</span>` : ""}
                 </div>
@@ -330,3 +331,4 @@ export function exportQuestionsFromBank(
       : "Question Bank - Questions Only",
   });
 }
+

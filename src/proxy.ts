@@ -1,6 +1,14 @@
-import { auth } from "@/auth";
+/**
+ * Next.js 16 Proxy (Auth Protection)
+ * 
+ * Uses Better Auth for session checking and role-based routing.
+ * For performance, we use cookie-based checks in the proxy layer.
+ * Full session validation happens in page/route handlers.
+ */
+
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { getSessionCookie } from "better-auth/cookies";
 import {
   canAccessAdminRoutes,
   canAccessCoordinatorRoutes,
@@ -47,55 +55,75 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Now we can safely call auth() for protected routes
-  const session = await auth();
+  // Check for session cookie (fast, optimistic check)
+  // NOTE: This only checks cookie existence, not validity
+  // Full session validation happens in page handlers
+  const sessionCookie = getSessionCookie(request);
 
-  // Redirect to sign-in if no session
-  if (!session?.user) {
+  // Redirect to sign-in if no session cookie
+  if (!sessionCookie) {
     const signInUrl = new URL("/sign-in", request.url);
     signInUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(signInUrl);
   }
 
-  // Check if user account is active
-  if (!session.user.isActive) {
-    return NextResponse.redirect(new URL("/unauthorized", request.url));
-  }
+  // For role-based routing, we need to get session data
+  // Use the auth API to get the full session
+  try {
+    const { getSession } = await import("@/lib/auth");
+    const session = await getSession(request.headers);
 
-  // Role-based route protection
-  const userRole = session.user.role as UserRole;
+    if (!session?.user) {
+      const signInUrl = new URL("/sign-in", request.url);
+      signInUrl.searchParams.set("callbackUrl", pathname);
+      return NextResponse.redirect(signInUrl);
+    }
 
-  // Redirect COE users from /coe/dashboard to /coordinator/dashboard
-  if (pathname.startsWith("/coe/dashboard")) {
-    if (userRole === "CONTROLLER_OF_EXAMINATION") {
-      // Replace /coe/dashboard with /coordinator/dashboard
-      const newPath = pathname.replace("/coe/dashboard", "/coordinator/dashboard");
-      return NextResponse.redirect(new URL(newPath, request.url));
-    } else {
+    // Check if user account is active
+    if (!session.user.isActive) {
       return NextResponse.redirect(new URL("/unauthorized", request.url));
     }
-  }
 
-  // Admin routes protection
-  if (pathname.startsWith("/admin")) {
-    if (!canAccessAdminRoutes(userRole)) {
-      return NextResponse.redirect(new URL("/unauthorized", request.url));
-    }
-  }
+    // Role-based route protection
+    const userRole = session.user.role as UserRole;
 
-  // Coordinator routes protection
-  if (pathname.startsWith("/coordinator")) {
-    if (!canAccessCoordinatorRoutes(userRole)) {
-      return NextResponse.redirect(new URL("/unauthorized", request.url));
+    // Redirect COE users from /coe/dashboard to /coordinator/dashboard
+    if (pathname.startsWith("/coe/dashboard")) {
+      if (userRole === "CONTROLLER_OF_EXAMINATION") {
+        // Replace /coe/dashboard with /coordinator/dashboard
+        const newPath = pathname.replace("/coe/dashboard", "/coordinator/dashboard");
+        return NextResponse.redirect(new URL(newPath, request.url));
+      } else {
+        return NextResponse.redirect(new URL("/unauthorized", request.url));
+      }
     }
-  }
 
-  // Auto-redirect based on role for generic dashboard access
-  if (pathname === "/dashboard") {
-    const dashboardRoute = getDashboardRoute(userRole);
-    if (dashboardRoute !== "/dashboard") {
-      return NextResponse.redirect(new URL(dashboardRoute, request.url));
+    // Admin routes protection
+    if (pathname.startsWith("/admin")) {
+      if (!canAccessAdminRoutes(userRole)) {
+        return NextResponse.redirect(new URL("/unauthorized", request.url));
+      }
     }
+
+    // Coordinator routes protection
+    if (pathname.startsWith("/coordinator")) {
+      if (!canAccessCoordinatorRoutes(userRole)) {
+        return NextResponse.redirect(new URL("/unauthorized", request.url));
+      }
+    }
+
+    // Auto-redirect based on role for generic dashboard access
+    if (pathname === "/dashboard") {
+      const dashboardRoute = getDashboardRoute(userRole);
+      if (dashboardRoute !== "/dashboard") {
+        return NextResponse.redirect(new URL(dashboardRoute, request.url));
+      }
+    }
+
+  } catch (error) {
+    // If session check fails, let the request through
+    // Page handlers will do full validation
+    console.error("Proxy session check error:", error);
   }
 
   return NextResponse.next();

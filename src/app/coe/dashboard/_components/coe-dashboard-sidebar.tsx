@@ -2,9 +2,7 @@
 
 import {
     Home,
-    FileText,
     Eye,
-    Layout,
     PanelLeftOpen,
     LogOut,
 } from "lucide-react";
@@ -33,7 +31,6 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 import { logout } from "@/actions/auth";
 
 // Navigation items for COE Dashboard

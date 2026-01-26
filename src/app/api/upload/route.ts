@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { writeFile } from "fs/promises";
 import { join } from "path";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   try {
     // Check authentication first (before reading body)
-    const session = await auth();
+    const session = await getSession(request.headers);
+    
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

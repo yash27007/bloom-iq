@@ -8,6 +8,9 @@ import {
     PanelLeftOpen,
     LogOut,
     Plus,
+    MessageSquare,
+    FileSearch,
+    ClipboardCheck,
 } from "lucide-react";
 import { SiBookstack } from "react-icons/si";
 import { RiGeminiFill } from "react-icons/ri";
@@ -38,7 +41,18 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { logout } from "@/actions/auth";
-// Navigation items organized by groups
+
+// Role-based navigation configuration
+type UserRole = "COURSE_COORDINATOR" | "MODULE_COORDINATOR" | "PROGRAM_COORDINATOR" | "CONTROLLER_OF_EXAMINATION" | "ADMIN";
+
+interface NavigationItem {
+    title: string;
+    url: string;
+    icon: React.ComponentType<{ className?: string }>;
+    roles?: UserRole[]; // If undefined, available to all
+}
+
+// Navigation items organized by groups with role-based visibility
 const navigationItems = {
     main: [
         {
@@ -46,47 +60,83 @@ const navigationItems = {
             url: "/coordinator/dashboard",
             icon: Home,
         }
-    ],
+    ] as NavigationItem[],
     courseManagement: [
         {
             title: "Upload Material",
             url: "/coordinator/dashboard/course-management/upload-material",
             icon: Upload,
+            roles: ["COURSE_COORDINATOR"], // Only CC can upload
         },
         {
             title: "Generate Questions",
             url: "/coordinator/dashboard/course-management/generate-questions",
             icon: RiGeminiFill,
+            roles: ["COURSE_COORDINATOR"], // Only CC can generate
         },
-    ],
+        {
+            title: "Chat with PDF",
+            url: "/coordinator/dashboard/course-management/chat-pdf",
+            icon: MessageSquare,
+            roles: ["COURSE_COORDINATOR"], // Only CC can chat
+        },
+    ] as NavigationItem[],
     questionPaper: [
         {
             title: "Question Bank",
             url: "/coordinator/dashboard/question-paper/question-bank",
             icon: SiBookstack,
+            // All coordinators can view
+        },
+        {
+            title: "Review Questions",
+            url: "/coordinator/dashboard/question-paper/review-questions",
+            icon: ClipboardCheck,
+            // All coordinators can review (based on their role)
         },
         {
             title: "Create Pattern",
             url: "/coordinator/dashboard/question-paper/create-pattern",
             icon: Layout,
+            roles: ["COURSE_COORDINATOR"], // Only CC can create
         },
         {
             title: "View Patterns",
             url: "/coordinator/dashboard/question-paper/patterns",
             icon: FaFilePen,
+            // All can view
         },
         {
             title: "Approve Patterns",
             url: "/coordinator/dashboard/question-paper/approve-patterns",
             icon: FileCheck,
+            roles: ["MODULE_COORDINATOR", "PROGRAM_COORDINATOR", "CONTROLLER_OF_EXAMINATION"],
+        },
+        {
+            title: "Validate Question Paper",
+            url: "/coordinator/dashboard/question-paper/validate",
+            icon: FileSearch,
+            roles: ["COURSE_COORDINATOR", "MODULE_COORDINATOR", "PROGRAM_COORDINATOR"],
+        },
+        {
+            title: "Generate Question Paper",
+            url: "/coordinator/dashboard/generate-paper",
+            icon: Plus,
+            roles: ["CONTROLLER_OF_EXAMINATION"],
         }
-    ]
+    ] as NavigationItem[]
 };
 
-interface MenuItem {
-    title: string;
-    url: string;
-    icon: React.ComponentType<{ className?: string }>;
+/**
+ * Filter navigation items based on user role
+ */
+function getVisibleItems(items: NavigationItem[], userRole?: string): NavigationItem[] {
+    return items.filter(item => {
+        // If no roles specified, visible to all
+        if (!item.roles || item.roles.length === 0) return true;
+        // Check if user's role is in the allowed roles
+        return userRole && item.roles.includes(userRole as UserRole);
+    });
 }
 
 interface CoordinatorDashboardSidebarProps {
@@ -100,7 +150,7 @@ interface CoordinatorDashboardSidebarProps {
 }
 
 // Simple Menu Item Component with Tooltip
-const MenuItemWithTooltip = ({ item, isCollapsed }: { item: MenuItem; isCollapsed: boolean }) => {
+const MenuItemWithTooltip = ({ item, isCollapsed }: { item: NavigationItem; isCollapsed: boolean }) => {
     return (
         <SidebarMenuItem>
             <TooltipProvider>
@@ -127,6 +177,11 @@ const MenuItemWithTooltip = ({ item, isCollapsed }: { item: MenuItem; isCollapse
 export const CoordinatorDashboardSidebar = ({ user }: CoordinatorDashboardSidebarProps) => {
     const { state } = useSidebar();
     const isCollapsed = state === "collapsed";
+    
+    // Get filtered navigation items based on user role
+    const visibleCourseManagement = getVisibleItems(navigationItems.courseManagement, user?.role);
+    const visibleQuestionPaper = getVisibleItems(navigationItems.questionPaper, user?.role);
+    
     return (
         <Sidebar collapsible="icon" className="group/sidebar">
             <SidebarHeader className="py-4">
@@ -187,45 +242,36 @@ export const CoordinatorDashboardSidebar = ({ user }: CoordinatorDashboardSideba
                     </SidebarGroupContent>
                 </SidebarGroup>
 
-                {/* Course Management */}
-                <SidebarGroup>
-                    <SidebarGroupLabel>Course Management</SidebarGroupLabel>
-                    <SidebarGroupContent>
-                        <SidebarMenu>
-                            {navigationItems.courseManagement.map((item) => (
-                                <MenuItemWithTooltip
-                                    key={item.title}
-                                    item={item}
-                                    isCollapsed={isCollapsed}
-                                />
-                            ))}
-                        </SidebarMenu>
-                    </SidebarGroupContent>
-                </SidebarGroup>
+                {/* Course Management - Only show if user has any visible items */}
+                {visibleCourseManagement.length > 0 && (
+                    <SidebarGroup>
+                        <SidebarGroupLabel>Course Management</SidebarGroupLabel>
+                        <SidebarGroupContent>
+                            <SidebarMenu>
+                                {visibleCourseManagement.map((item) => (
+                                    <MenuItemWithTooltip
+                                        key={item.title}
+                                        item={item}
+                                        isCollapsed={isCollapsed}
+                                    />
+                                ))}
+                            </SidebarMenu>
+                        </SidebarGroupContent>
+                    </SidebarGroup>
+                )}
 
                 {/* Question Paper */}
                 <SidebarGroup>
                     <SidebarGroupLabel>Question Paper</SidebarGroupLabel>
                     <SidebarGroupContent>
                         <SidebarMenu>
-                            {navigationItems.questionPaper.map((item) => (
+                            {visibleQuestionPaper.map((item) => (
                                 <MenuItemWithTooltip
                                     key={item.title}
                                     item={item}
                                     isCollapsed={isCollapsed}
                                 />
                             ))}
-                            {/* Show Generate Question Paper only for Controller of Examination */}
-                            {user?.role === "CONTROLLER_OF_EXAMINATION" && (
-                                <MenuItemWithTooltip
-                                    item={{
-                                        title: "Generate Question Paper",
-                                        url: "/coordinator/dashboard/generate-paper",
-                                        icon: Plus,
-                                    }}
-                                    isCollapsed={isCollapsed}
-                                />
-                            )}
                         </SidebarMenu>
                     </SidebarGroupContent>
                 </SidebarGroup>

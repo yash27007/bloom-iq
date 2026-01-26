@@ -1,5 +1,6 @@
 import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
-import { auth } from "@/auth";
+import { getSession, type AppSession } from "@/lib/auth";
+import { headers } from "next/headers";
 
 /**
  * Inner context for tRPC procedures that doesn't depend on the request.
@@ -7,7 +8,7 @@ import { auth } from "@/auth";
  */
 export async function createContextInner() {
   // Get session for inner context - this will work for server-side calls
-  const session = await auth();
+  const session = await getSession(await headers());
 
   return {
     session,
@@ -20,7 +21,7 @@ export async function createContextInner() {
  */
 export async function createTRPCContext(opts: FetchCreateContextFnOptions) {
   // For API routes, we can get the session from the request
-  const session = await auth();
+  const session = await getSession(opts.req.headers);
 
   return {
     ...(await createContextInner()),
@@ -30,4 +31,6 @@ export async function createTRPCContext(opts: FetchCreateContextFnOptions) {
   };
 }
 
-export type Context = Awaited<ReturnType<typeof createContextInner>>;
+export type Context = {
+  session: AppSession | null;
+};

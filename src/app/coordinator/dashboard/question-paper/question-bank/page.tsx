@@ -52,14 +52,16 @@ import { Loader2, Search, Edit, Trash2, CheckCircle2, Filter, Download, FileText
 import { toast } from "sonner";
 import { exportQuestionsFromBank } from "@/lib/pdf-export";
 
-interface Question {
+// Question type - flexible to match different API returns
+type Question = {
     id: string;
     question: string;
     answer: string;
     marks: "TWO" | "EIGHT" | "SIXTEEN";
     difficultyLevel: "EASY" | "MEDIUM" | "HARD";
     bloomLevel: "REMEMBER" | "UNDERSTAND" | "APPLY" | "ANALYZE" | "EVALUATE" | "CREATE";
-    questionType: "DIRECT" | "INDIRECT" | "SCENARIO_BASED" | "PROBLEM_BASED";
+    questionType: string; // DB uses this for bloom level, but API expects generation type
+    generationType: "DIRECT" | "INDIRECT" | "SCENARIO_BASED" | "PROBLEM_BASED";
     unit: number;
     reviewedByCc: boolean;
     reviewedByMc: boolean;
@@ -67,7 +69,8 @@ interface Question {
     isFinalized: boolean;
     approvalStatusLabel: string;
     createdAt: Date;
-}
+    [key: string]: unknown; // Allow other properties
+};
 
 export default function QuestionBankPage() {
     // State for filters
@@ -219,7 +222,7 @@ export default function QuestionBankPage() {
             marks: questionToEdit.marks,
             difficultyLevel: questionToEdit.difficultyLevel,
             bloomLevel: questionToEdit.bloomLevel,
-            questionType: questionToEdit.questionType,
+            questionType: questionToEdit.generationType as "DIRECT" | "INDIRECT" | "SCENARIO_BASED" | "PROBLEM_BASED",
             unit: questionToEdit.unit,
         });
     };

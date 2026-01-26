@@ -26,6 +26,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Check if user has a password (might be null for social auth)
+    if (!user.password) {
+      return NextResponse.json(
+        { error: "Invalid credentials" },
+        { status: 401 }
+      );
+    }
+
     const isPasswordValid = await compare(password as string, user.password);
 
     if (!isPasswordValid) {

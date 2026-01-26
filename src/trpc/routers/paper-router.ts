@@ -10,10 +10,9 @@ import { TRPCError } from "@trpc/server";
 async function selectQuestionsForPaper(
   courseId: string,
   pattern: {
-    partA_count: number;
-    partA_marksEach: number;
-    partB_count: number;
-    partB_marksEach: number;
+    partAStructure?: unknown;
+    partBStructure?: unknown;
+    totalMarks: number;
   }
 ) {
   // Get all fully approved questions for the course
@@ -35,52 +34,60 @@ async function selectQuestionsForPaper(
     });
   }
 
-  // Select Part A questions (TWO marks)
-  const partA_marksEnum =
-    pattern.partA_marksEach === 2
-      ? "TWO"
-      : pattern.partA_marksEach === 8
-      ? "EIGHT"
-      : "SIXTEEN";
-  const partAQuestions = approvedQuestions.filter(
-    (q) => q.marks === partA_marksEnum
-  );
+  // Parse pattern structures
+  const partASlots = Array.isArray(pattern.partAStructure) ? pattern.partAStructure : [];
+  const partBGroups = Array.isArray(pattern.partBStructure) ? pattern.partBStructure : [];
 
-  if (partAQuestions.length < pattern.partA_count) {
+  // Count questions needed for Part A (typically 2 marks each)
+  const partACount = partASlots.length;
+  const partA_marksEach = partASlots[0]?.marks || 2;
+  const partA_marksEnum = partA_marksEach === 2 ? "TWO" : partA_marksEach === 8 ? "EIGHT" : "SIXTEEN";
+  
+  const partAQuestions = approvedQuestions.filter((q) => q.marks === partA_marksEnum);
+
+  if (partAQuestions.length < partACount) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: `Not enough ${pattern.partA_marksEach}-mark questions. Need ${pattern.partA_count}, found ${partAQuestions.length}`,
+      message: `Not enough ${partA_marksEach}-mark questions. Need ${partACount}, found ${partAQuestions.length}`,
     });
   }
 
   // Randomly select Part A questions
   const selectedPartA = partAQuestions
     .sort(() => Math.random() - 0.5)
-    .slice(0, pattern.partA_count);
+    .slice(0, partACount);
 
-  // Select Part B questions (EIGHT or SIXTEEN marks)
-  const partB_marksEnum =
-    pattern.partB_marksEach === 2
-      ? "TWO"
-      : pattern.partB_marksEach === 8
-      ? "EIGHT"
-      : "SIXTEEN";
+  // Count questions needed for Part B
+  // For OR patterns, we need questions for both options
+  let partBCount = 0;
+  let partB_marksEach = 16;
+  for (const group of partBGroups as any[]) {
+    if (group.hasOR && group.options) {
+      // Need questions for both options
+      partBCount += group.options.length;
+      partB_marksEach = group.options[0]?.questionSlot?.marks || 16;
+    } else if (group.questionSlot) {
+      partBCount += 1;
+      partB_marksEach = group.questionSlot.marks || 16;
+    }
+  }
+
+  const partB_marksEnum = partB_marksEach === 2 ? "TWO" : partB_marksEach === 8 ? "EIGHT" : "SIXTEEN";
   const partBQuestions = approvedQuestions.filter(
-    (q) =>
-      q.marks === partB_marksEnum && !selectedPartA.find((a) => a.id === q.id)
+    (q) => q.marks === partB_marksEnum && !selectedPartA.find((a) => a.id === q.id)
   );
 
-  if (partBQuestions.length < pattern.partB_count) {
+  if (partBQuestions.length < partBCount) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: `Not enough ${pattern.partB_marksEach}-mark questions. Need ${pattern.partB_count}, found ${partBQuestions.length}`,
+      message: `Not enough ${partB_marksEach}-mark questions. Need ${partBCount}, found ${partBQuestions.length}`,
     });
   }
 
   // Randomly select Part B questions
   const selectedPartB = partBQuestions
     .sort(() => Math.random() - 0.5)
-    .slice(0, pattern.partB_count);
+    .slice(0, partBCount);
 
   return {
     partA: selectedPartA,
@@ -185,6 +192,14 @@ export const paperRouter = createTRPCRouter({
         });
       }
 
+      // Validate input
+      if (!input.patternId || !input.setVariant) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Pattern ID and set variant are required",
+        });
+      }
+
       // Get the pattern
       const pattern = await prisma.questionPaperPattern.findUnique({
         where: { id: input.patternId },
@@ -224,7 +239,7 @@ export const paperRouter = createTRPCRouter({
       );
 
       // Generate paper code
-      const paperCode = `${course.course_code}-${pattern.academicYear}-${pattern.semester}-${input.setVariant}`;
+      const paperCode = `${course.course_code}-${pattern.academicYear}-${pattern.semesterType}-${input.setVariant}`;
 
       // Check if paper with this code already exists
       const existingPaper = await prisma.questionPaper.findUnique({
@@ -267,6 +282,7 @@ export const paperRouter = createTRPCRouter({
 
       return {
         success: true,
+        paperId: paper.id,
         paper,
       };
     }),
@@ -317,8 +333,15 @@ export const paperRouter = createTRPCRouter({
             select: {
               patternName: true,
               academicYear: true,
-              semester: true,
+              semesterType: true,
               examType: true,
+              totalMarks: true,
+              course: {
+                select: {
+                  course_code: true,
+                  name: true,
+                },
+              },
             },
           },
         },
@@ -353,7 +376,16 @@ export const paperRouter = createTRPCRouter({
       const paper = await prisma.questionPaper.findUnique({
         where: { id: input.paperId },
         include: {
-          pattern: true,
+          pattern: {
+            include: {
+              course: {
+                select: {
+                  course_code: true,
+                  name: true,
+                },
+              },
+            },
+          },
         },
       });
 

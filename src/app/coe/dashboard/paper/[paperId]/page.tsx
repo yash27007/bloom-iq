@@ -87,8 +87,12 @@ export default function PaperViewPage({ params }: PaperViewProps) {
     let paperContent;
     let answerKeyContent;
     try {
-        paperContent = JSON.parse(paper.paperContent);
-        answerKeyContent = JSON.parse(paper.answerKeyContent);
+        if (paper.paperContent) {
+            paperContent = JSON.parse(paper.paperContent);
+        }
+        if (paper.answerKeyContent) {
+            answerKeyContent = JSON.parse(paper.answerKeyContent);
+        }
     } catch (e) {
         console.error("Failed to parse paper content", e);
     }
@@ -162,7 +166,7 @@ export default function PaperViewPage({ params }: PaperViewProps) {
                         </div>
                         <div>
                             <p className="text-sm text-muted-foreground">Semester</p>
-                            <p className="font-medium">Semester {paper.pattern.semester}</p>
+                            <p className="font-medium">{paper.pattern.semesterType}</p>
                         </div>
                         <div>
                             <p className="text-sm text-muted-foreground">Set Variant</p>
@@ -205,7 +209,7 @@ export default function PaperViewPage({ params }: PaperViewProps) {
                                             </p>
                                             <p>
                                                 {paperContent.header?.academicYear || paper.pattern.academicYear},{" "}
-                                                Semester {paperContent.header?.semester || paper.pattern.semester}
+                                                {paperContent.header?.semester || paper.pattern.semesterType}
                                             </p>
                                             <p className="font-medium">
                                                 Paper Code: {paper.paperCode} | Set: {paper.setVariant}

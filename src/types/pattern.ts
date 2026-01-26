@@ -65,7 +65,7 @@ export interface OROption {
 export interface PartBQuestionGroup {
   groupNumber: number; // 11, 12, 13, etc.
   hasOR: boolean; // true for END_SEMESTER, false for SESSIONAL
-  options: OROption[]; // If hasOR is true, contains option A and B
+  options?: OROption[]; // If hasOR is true, contains option A and B
   questionSlot?: PartBQuestionSlot; // If hasOR is false (Sessional)
 }
 
