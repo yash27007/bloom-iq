@@ -23,6 +23,8 @@ export interface ChunkingOptions {
   overlapTokens?: number;
   method?: "by-heading" | "by-tokens" | "hybrid";
   preserveContext?: boolean;
+  /** Include context from previous chunk for better RAG retrieval */
+  includeOverlap?: boolean;
 }
 
 const DEFAULT_OPTIONS: ChunkingOptions = {
@@ -31,6 +33,7 @@ const DEFAULT_OPTIONS: ChunkingOptions = {
   overlapTokens: 200,
   method: "by-heading",
   preserveContext: true,
+  includeOverlap: true,
 };
 
 /**
@@ -143,7 +146,41 @@ function extractKeywords(content: string): string[] {
 }
 
 /**
- * Merge small sections into larger chunks
+ * Extract overlap text from the end of a string (for context preservation)
+ * @param text Source text to extract overlap from
+ * @param targetTokens Approximate number of tokens to extract
+ * @returns Overlap text ending at a sentence boundary
+ */
+function extractOverlap(text: string, targetTokens: number): string {
+  if (!text || targetTokens <= 0) return "";
+  
+  // Approximate character count for target tokens
+  const targetChars = targetTokens * 4;
+  
+  if (text.length <= targetChars) return text;
+  
+  // Get the last portion of text
+  const endPortion = text.slice(-targetChars * 1.5); // Get a bit more to find sentence boundary
+  
+  // Find the first sentence boundary in this portion
+  const sentenceMatch = endPortion.match(/[.!?]\s+[A-Z]/);
+  if (sentenceMatch && sentenceMatch.index !== undefined) {
+    const overlapStart = sentenceMatch.index + 2; // Include the space after punctuation
+    return endPortion.slice(overlapStart);
+  }
+  
+  // If no sentence boundary found, try to break at a paragraph
+  const paragraphMatch = endPortion.match(/\n\n/);
+  if (paragraphMatch && paragraphMatch.index !== undefined) {
+    return endPortion.slice(paragraphMatch.index + 2);
+  }
+  
+  // Fallback: just take the approximate amount
+  return text.slice(-targetChars);
+}
+
+/**
+ * Merge small sections into larger chunks with overlap support
  */
 function mergeSections(
   sections: Array<{
@@ -154,7 +191,9 @@ function mergeSections(
     endLine: number;
   }>,
   maxTokens: number,
-  minTokens: number
+  minTokens: number,
+  includeOverlap: boolean = true,
+  overlapTokens: number = 200
 ): Chunk[] {
   const chunks: Chunk[] = [];
 
@@ -167,6 +206,7 @@ function mergeSections(
   };
 
   let currentChunk: TempChunk | null = null;
+  let previousChunkContent: string = "";
 
   for (const section of sections) {
     const sectionTokens = estimateTokens(section.content);
@@ -188,19 +228,33 @@ function mergeSections(
       currentChunk.tokens += sectionTokens;
     } else {
       // Current chunk is full, save it
+      const chunkContent = currentChunk.content.join("\n\n");
+      
+      // Add overlap from previous chunk if enabled
+      let finalContent = chunkContent;
+      if (includeOverlap && previousChunkContent) {
+        const overlap = extractOverlap(previousChunkContent, overlapTokens);
+        if (overlap) {
+          finalContent = `[Context from previous section]\n${overlap}\n\n---\n\n${chunkContent}`;
+        }
+      }
+      
       chunks.push({
         id: `chunk-${chunks.length + 1}`,
         title: currentChunk.headings.join(" → "),
-        content: currentChunk.content.join("\n\n"),
+        content: finalContent,
         startLine: currentChunk.startLine,
         endLine: currentChunk.endLine,
-        tokens: currentChunk.tokens,
+        tokens: estimateTokens(finalContent),
         metadata: {
           headingLevel: section.level,
           hasSubsections: currentChunk.headings.length > 1,
-          topicKeywords: extractKeywords(currentChunk.content.join(" ")),
+          topicKeywords: extractKeywords(chunkContent),
         },
       });
+
+      // Store current chunk content for next overlap
+      previousChunkContent = chunkContent;
 
       // Start new chunk with current section
       currentChunk = {
@@ -215,17 +269,28 @@ function mergeSections(
 
   // Add last chunk
   if (currentChunk && currentChunk.tokens >= minTokens) {
+    const chunkContent = currentChunk.content.join("\n\n");
+    
+    // Add overlap from previous chunk if enabled
+    let finalContent = chunkContent;
+    if (includeOverlap && previousChunkContent) {
+      const overlap = extractOverlap(previousChunkContent, overlapTokens);
+      if (overlap) {
+        finalContent = `[Context from previous section]\n${overlap}\n\n---\n\n${chunkContent}`;
+      }
+    }
+    
     chunks.push({
       id: `chunk-${chunks.length + 1}`,
       title: currentChunk.headings.join(" → "),
-      content: currentChunk.content.join("\n\n"),
+      content: finalContent,
       startLine: currentChunk.startLine,
       endLine: currentChunk.endLine,
-      tokens: currentChunk.tokens,
+      tokens: estimateTokens(finalContent),
       metadata: {
         headingLevel: 1,
         hasSubsections: currentChunk.headings.length > 1,
-        topicKeywords: extractKeywords(currentChunk.content.join(" ")),
+        topicKeywords: extractKeywords(chunkContent),
       },
     });
   }
@@ -274,11 +339,13 @@ export async function chunkContent(
   const sections = splitByHeadings(content);
   console.log(`[Chunker] Found ${sections.length} sections`);
 
-  // Merge sections into optimal chunks
+  // Merge sections into optimal chunks with overlap
   const chunks = mergeSections(
     sections,
     opts.maxTokensPerChunk!,
-    opts.minTokensPerChunk!
+    opts.minTokensPerChunk!,
+    opts.includeOverlap ?? true,
+    opts.overlapTokens ?? 200
   );
 
   console.log(`[Chunker] Created ${chunks.length} chunks:`);

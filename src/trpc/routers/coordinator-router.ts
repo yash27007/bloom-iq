@@ -2326,7 +2326,6 @@ Respond naturally:
 
         logger.debug("CoordinatorRouter", "Chat response generated", {
           answerLength: answer.length,
-          originalLength: data.response?.length || 0,
         });
 
         // Save assistant response
