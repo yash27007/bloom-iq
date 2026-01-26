@@ -120,18 +120,71 @@ export interface AppSession {
 
 /**
  * Get session with properly typed user including custom fields
+ * Uses our custom session table
  */
 export async function getSession(headers: Headers): Promise<AppSession | null> {
-  const session = await auth.api.getSession({
-    headers,
+  // First try Better Auth's session
+  try {
+    const session = await auth.api.getSession({
+      headers,
+    });
+    
+    if (session) {
+      return session as unknown as AppSession;
+    }
+  } catch {
+    // Fall through to custom session check
+  }
+  
+  // Check for our custom session cookie
+  const cookieHeader = headers.get("cookie");
+  if (!cookieHeader) return null;
+  
+  const cookies = Object.fromEntries(
+    cookieHeader.split("; ").map(c => c.split("="))
+  );
+  const token = cookies["better-auth.session_token"];
+  
+  if (!token) return null;
+  
+  // Import prisma dynamically to avoid circular dependency
+  const { prisma } = await import("@/lib/prisma");
+  
+  const dbSession = await prisma.session.findUnique({
+    where: { token },
+    include: { user: true },
   });
   
-  if (!session) {
+  if (!dbSession || dbSession.expiresAt < new Date()) {
     return null;
   }
   
-  // Cast the session to include our custom user fields
-  return session as unknown as AppSession;
+  return {
+    session: {
+      id: dbSession.id,
+      userId: dbSession.userId,
+      expiresAt: dbSession.expiresAt,
+      token: dbSession.token,
+      createdAt: dbSession.createdAt,
+      updatedAt: dbSession.updatedAt,
+      ipAddress: dbSession.ipAddress || undefined,
+      userAgent: dbSession.userAgent || undefined,
+    },
+    user: {
+      id: dbSession.user.id,
+      email: dbSession.user.email,
+      name: dbSession.user.name,
+      firstName: dbSession.user.firstName,
+      lastName: dbSession.user.lastName,
+      facultyId: dbSession.user.facultyId,
+      role: dbSession.user.role,
+      designation: dbSession.user.designation,
+      isActive: dbSession.user.isActive,
+      image: dbSession.user.image,
+      createdAt: dbSession.user.createdAt,
+      updatedAt: dbSession.user.updatedAt,
+    },
+  };
 }
 
 // Export the base auth types

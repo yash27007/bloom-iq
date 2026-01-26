@@ -18,7 +18,6 @@ import { FormError } from "@/components/auth/form-error"
 import { FormSuccess } from "@/components/auth/form-success"
 import { useRouter } from "next/navigation"
 import { Eye, EyeOff, Loader2 } from "lucide-react"
-import { signIn } from "@/lib/auth-client"
 import { getDashboardRoute, type UserRole } from "@/lib/auth-utils"
 
 export const LoginForm = () => {
@@ -42,26 +41,35 @@ export const LoginForm = () => {
         setIsLoading(true);
 
         try {
-            const result = await signIn.email({
-                email: values.email,
-                password: values.password,
+            // Use custom sign-in endpoint that works with our User.password field
+            const response = await fetch("/api/auth/signin", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    email: values.email,
+                    password: values.password,
+                }),
             });
 
-            if (result.error) {
+            const result = await response.json();
+
+            if (!response.ok) {
                 // Check for account deactivation
-                if (result.error.message?.includes("deactivated")) {
+                if (result.error?.includes("deactivated")) {
                     router.push("/unauthorized");
                     return;
                 }
-                setError("Invalid email or password. Please check your credentials and try again.");
+                setError(result.error || "Invalid email or password. Please check your credentials and try again.");
                 return;
             }
 
-            if (result.data?.user) {
+            if (result.user) {
                 setSuccess("Login successful! Redirecting...");
                 
                 // Get user role and redirect to appropriate dashboard
-                const userRole = (result.data.user as { role?: string }).role as UserRole | undefined;
+                const userRole = result.user.role as UserRole | undefined;
                 if (userRole) {
                     const dashboardRoute = getDashboardRoute(userRole);
                     router.push(dashboardRoute);
@@ -71,13 +79,7 @@ export const LoginForm = () => {
             }
         } catch (error: any) {
             console.error("Login error:", error);
-            // Show more detailed error in development
-            const errorMessage = error?.message || error?.toString() || "Unknown error";
-            if (process.env.NODE_ENV === "development") {
-                setError(`Error: ${errorMessage}`);
-            } else {
-                setError("An unexpected error occurred. Please try again later.");
-            }
+            setError("An unexpected error occurred. Please try again later.");
         } finally {
             setIsLoading(false);
         }

@@ -1,6 +1,5 @@
 "use client";
 
-import { signOut } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { LogOut, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -23,13 +22,8 @@ export function LogoutButton({
   const handleLogout = async () => {
     setIsLoading(true);
     try {
-      await signOut({
-        fetchOptions: {
-          onSuccess: () => {
-            router.push("/sign-in");
-          },
-        },
-      });
+      await fetch("/api/auth/signout", { method: "POST" });
+      router.push("/sign-in");
     } catch (error) {
       console.error("Logout error:", error);
       // Still redirect on error
