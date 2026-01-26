@@ -2,7 +2,8 @@
  * Logger Service
  *
  * Comprehensive logging system with automatic file rotation and cleanup
- * Logs are stored in logs/ directory and auto-deleted after 72 hours
+ * - In development: Logs to files in logs/ directory
+ * - In production (Vercel/serverless): Logs to console only (read-only filesystem)
  */
 
 import { writeFile, mkdir, readdir, stat, unlink } from "fs/promises";
@@ -29,17 +30,45 @@ export interface LogEntry {
   };
 }
 
+// Check if we're in a serverless environment (Vercel, AWS Lambda, etc.)
+const isServerless = (): boolean => {
+  return !!(
+    process.env.VERCEL ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.NETLIFY ||
+    process.env.VERCEL_ENV
+  );
+};
+
 class Logger {
   private logDir: string;
   private currentLogFile: string;
   private cleanupInterval: NodeJS.Timeout | null = null;
   private readonly LOG_RETENTION_HOURS = 72;
+  private readonly canWriteFiles: boolean;
 
   constructor() {
     this.logDir = join(process.cwd(), "logs");
     this.currentLogFile = this.getLogFileName();
-    this.ensureLogDirectory();
-    this.startAutoCleanup();
+    
+    // Only enable file logging in non-serverless environments
+    this.canWriteFiles = !isServerless() && process.env.NODE_ENV !== "production";
+    
+    if (this.canWriteFiles) {
+      this.initFileLogging();
+    }
+  }
+
+  /**
+   * Initialize file logging (only in development)
+   */
+  private async initFileLogging(): Promise<void> {
+    try {
+      await this.ensureLogDirectory();
+      this.startAutoCleanup();
+    } catch (error) {
+      console.warn("[Logger] File logging disabled:", error);
+    }
   }
 
   /**
@@ -55,8 +84,14 @@ class Logger {
    * Ensure logs directory exists
    */
   private async ensureLogDirectory(): Promise<void> {
-    if (!existsSync(this.logDir)) {
-      await mkdir(this.logDir, { recursive: true });
+    if (!this.canWriteFiles) return;
+    
+    try {
+      if (!existsSync(this.logDir)) {
+        await mkdir(this.logDir, { recursive: true });
+      }
+    } catch (error) {
+      // Silently fail - we'll use console logging instead
     }
   }
 
@@ -143,7 +178,42 @@ class Logger {
   }
 
   /**
-   * Write log entry to file
+   * Log to console with appropriate formatting
+   */
+  private logToConsole(
+    level: LogLevel,
+    service: string,
+    message: string,
+    data?: unknown,
+    error?: Error
+  ): void {
+    const timestamp = new Date().toISOString();
+    const consoleMessage = `[${timestamp}] [${level}] [${service}] ${message}`;
+    
+    switch (level) {
+      case LogLevel.ERROR:
+        if (error) {
+          console.error(consoleMessage, data || "", error);
+        } else {
+          console.error(consoleMessage, data || "");
+        }
+        break;
+      case LogLevel.WARN:
+        console.warn(consoleMessage, data || "");
+        break;
+      case LogLevel.DEBUG:
+        // Only log debug in development
+        if (process.env.NODE_ENV === "development") {
+          console.debug(consoleMessage, data || "");
+        }
+        break;
+      default:
+        console.log(consoleMessage, data || "");
+    }
+  }
+
+  /**
+   * Write log entry to file (only in development)
    */
   private async writeLog(
     level: LogLevel,
@@ -152,6 +222,14 @@ class Logger {
     data?: unknown,
     error?: Error
   ): Promise<void> {
+    // Always log to console
+    this.logToConsole(level, service, message, data, error);
+
+    // Only write to file if enabled
+    if (!this.canWriteFiles) {
+      return;
+    }
+
     try {
       await this.ensureLogDirectory();
 
@@ -163,22 +241,8 @@ class Logger {
 
       const logLine = this.formatLogEntry(level, service, message, data, error);
       await writeFile(this.currentLogFile, logLine, { flag: "a" });
-
-      // Also log to console in development
-      if (process.env.NODE_ENV === "development") {
-        const consoleMessage = `[${level}] [${service}] ${message}`;
-        if (error) {
-          console.error(consoleMessage, error);
-        } else if (data) {
-          console.log(consoleMessage, data);
-        } else {
-          console.log(consoleMessage);
-        }
-      }
     } catch (writeError) {
-      // Fallback to console if file write fails
-      console.error("[Logger] Failed to write log:", writeError);
-      console.log(`[${level}] [${service}] ${message}`, data || error);
+      // Silently fail - console logging is already done
     }
   }
 
@@ -186,6 +250,8 @@ class Logger {
    * Clean up old log files (older than 72 hours)
    */
   private async cleanupOldLogs(): Promise<void> {
+    if (!this.canWriteFiles) return;
+
     try {
       if (!existsSync(this.logDir)) {
         return;
@@ -212,7 +278,7 @@ class Logger {
         }
       }
     } catch (error) {
-      console.error("[Logger] Failed to cleanup old logs:", error);
+      // Silently fail
     }
   }
 
@@ -220,6 +286,8 @@ class Logger {
    * Start automatic cleanup (runs every 6 hours)
    */
   private startAutoCleanup(): void {
+    if (!this.canWriteFiles) return;
+
     // Run cleanup immediately
     this.cleanupOldLogs();
 
@@ -243,21 +311,21 @@ class Logger {
    * Log debug message
    */
   public debug(service: string, message: string, data?: unknown): void {
-    this.writeLog(LogLevel.DEBUG, service, message, data).catch(console.error);
+    this.writeLog(LogLevel.DEBUG, service, message, data).catch(() => {});
   }
 
   /**
    * Log info message
    */
   public info(service: string, message: string, data?: unknown): void {
-    this.writeLog(LogLevel.INFO, service, message, data).catch(console.error);
+    this.writeLog(LogLevel.INFO, service, message, data).catch(() => {});
   }
 
   /**
    * Log warning message
    */
   public warn(service: string, message: string, data?: unknown): void {
-    this.writeLog(LogLevel.WARN, service, message, data).catch(console.error);
+    this.writeLog(LogLevel.WARN, service, message, data).catch(() => {});
   }
 
   /**
@@ -269,9 +337,7 @@ class Logger {
     error?: Error,
     data?: unknown
   ): void {
-    this.writeLog(LogLevel.ERROR, service, message, data, error).catch(
-      console.error
-    );
+    this.writeLog(LogLevel.ERROR, service, message, data, error).catch(() => {});
   }
 
   /**

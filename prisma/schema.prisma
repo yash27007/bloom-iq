@@ -4,8 +4,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // ============================================
@@ -23,7 +23,7 @@ model User {
   firstName                 String
   lastName                  String
   facultyId                 String                    @unique
-  password                  String?                   // Optional for social auth
+  password                  String? // Optional for social auth
   designation               Designation
   role                      Role
   isActive                  Boolean                   @default(true)
@@ -137,7 +137,7 @@ model Course_Material {
   Question_Generation_Job Question_Generation_Job[]
   questions               Question[]
   chunks                  Material_Chunk[]
-  chatHistory             Chat_History[]              @relation("MaterialChatHistory")
+  chatHistory             Chat_History[]            @relation("MaterialChatHistory")
 
   @@index([id, courseId])
   @@index([courseId, unit])
@@ -210,14 +210,14 @@ model Question_Feedback {
 }
 
 model Chat_History {
-  id         String   @id @default(uuid())
-  userId    String
+  id         String          @id @default(uuid())
+  userId     String
   materialId String
-  role      String   // "user" or "assistant"
-  content   String
-  createdAt DateTime @default(now())
-  user      User     @relation("UserChatHistory", fields: [userId], references: [id], onDelete: Cascade)
-  material  Course_Material @relation("MaterialChatHistory", fields: [materialId], references: [id], onDelete: Cascade)
+  role       String // "user" or "assistant"
+  content    String
+  createdAt  DateTime        @default(now())
+  user       User            @relation("UserChatHistory", fields: [userId], references: [id], onDelete: Cascade)
+  material   Course_Material @relation("MaterialChatHistory", fields: [materialId], references: [id], onDelete: Cascade)
 
   @@index([userId, materialId, createdAt])
   @@index([createdAt]) // For 24-hour cleanup
