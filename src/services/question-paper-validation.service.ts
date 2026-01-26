@@ -1,7 +1,4 @@
 import { prisma } from "@/lib/prisma";
-import { parsePDFToText } from "@/lib/pdf-parser";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { logger } from "@/lib/logger";
 import { generateAIText } from "@/services/ai";
 
@@ -299,7 +296,7 @@ Return ONLY the JSON array, no other text.`;
  */
 export async function validateQuestionPaper(
   courseId: string,
-  questionPaperPath: string,
+  questionPaperContent: string, // Pre-parsed question paper text
   provider?: "GEMINI" | "OLLAMA"
 ): Promise<ValidationResult> {
   const errors: string[] = [];
@@ -330,13 +327,8 @@ export async function validateQuestionPaper(
     warnings.push("No course outcomes found in syllabus. Validation will be limited.");
   }
   
-  // 3. Parse question paper
-  const filePath = join(process.cwd(), "src", questionPaperPath);
-  const buffer = await readFile(filePath);
-  const pdfContent = await parsePDFToText(buffer);
-  
-  // 4. Analyze questions
-  const questions = await analyzeQuestionPaper(pdfContent.text, provider);
+  // 3. Analyze questions (content already parsed)
+  const questions = await analyzeQuestionPaper(questionPaperContent, provider);
   
   if (questions.length === 0) {
     errors.push("No questions found in the question paper.");

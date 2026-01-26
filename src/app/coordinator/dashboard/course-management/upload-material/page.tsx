@@ -126,13 +126,14 @@ export default function UploadMaterialPage() {
                 const fileResult = await response.json();
 
                 // Save the course material record using tRPC
-                // PDF parsing will happen in background automatically
+                // Content is already parsed by the upload API
                 await uploadMaterialMutation.mutateAsync({
                     courseId: selectedCourse,
                     title: materialTitle,
-                    filename: fileResult.filename,
+                    originalFilename: fileResult.originalName,
                     materialType: materialType,
                     unit: materialType === "UNIT_PDF" ? selectedUnit : 0,
+                    parsedContent: fileResult.parsedContent,
                 });
 
                 // Reset progress after delay

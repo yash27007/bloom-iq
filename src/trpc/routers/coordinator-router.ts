@@ -4,8 +4,6 @@ import * as z from "zod";
 import { TRPCError } from "@trpc/server";
 import { generateQuestionsWithAI } from "@/lib/ai-question-generator";
 import { parsePDFToText } from "@/lib/pdf-parser";
-import { readFile, unlink } from "fs/promises";
-import { join } from "path";
 import { logger } from "@/lib/logger";
 import {
   AIProviderType,
@@ -562,15 +560,24 @@ export const coordinatorRouter = createTRPCRouter({
     }
   }),
 
-  // Upload course material
+  // Upload course material (accepts pre-parsed content from upload API)
   uploadCourseMaterial: coordinatorProcedure
     .input(
       z.object({
         courseId: z.string(),
         title: z.string().min(1, "Title is required"),
-        filename: z.string().min(1, "Filename is required"),
+        originalFilename: z.string().min(1, "Original filename is required"),
         materialType: z.enum(["SYLLABUS", "UNIT_PDF"]),
         unit: z.number().min(0).max(5).default(0),
+        // Pre-parsed content from upload API
+        parsedContent: z.object({
+          text: z.string(),
+          markdown: z.string(),
+          metadata: z.object({
+            pages: z.number(),
+            info: z.record(z.string(), z.unknown()).optional(),
+          }),
+        }),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -598,16 +605,18 @@ export const coordinatorRouter = createTRPCRouter({
           });
         }
 
-        // Create the course material record with PENDING parsing status
+        // Create the course material record with parsed content already available
         const courseMaterial = await prisma.course_Material.create({
           data: {
             courseId: input.courseId,
             title: input.title,
-            filePath: `uploads/${input.filename}`,
+            filePath: input.originalFilename, // Store original filename for reference
             materialType: input.materialType,
             unit: input.materialType === "UNIT_PDF" ? input.unit : 0,
             uploadedById: userId,
-            parsingStatus: "PENDING", // Initial status
+            parsedContent: input.parsedContent.markdown, // Content already parsed
+            parsingStatus: "COMPLETED", // Already parsed by upload API
+            parsingError: null,
           },
           include: {
             course: {
@@ -625,46 +634,32 @@ export const coordinatorRouter = createTRPCRouter({
           },
         });
 
-        // Trigger background PDF parsing and embedding
-        // Use MaterialService's parsePDFInBackground which handles both parsing and embedding
+        logger.info(
+          "CoordinatorRouter",
+          `Material uploaded with pre-parsed content`,
+          {
+            materialId: courseMaterial.id,
+            title: input.title,
+            pages: input.parsedContent.metadata.pages,
+            contentLength: input.parsedContent.markdown.length,
+          }
+        );
+
+        // Trigger background embedding (content already parsed)
         const { MaterialService } = await import("@/services/material.service");
 
         // Use setTimeout to make it truly async and not block the response
         setTimeout(async () => {
           try {
-            // Read and parse the PDF
-            const filePath = join(
-              process.cwd(),
-              "src",
-              "uploads",
-              input.filename
-            );
-            const buffer = await readFile(filePath);
-            const pdfContent = await parsePDFToText(buffer);
-
-            // Update the database with parsed content
-            const material = await prisma.course_Material.update({
-              where: { id: courseMaterial.id },
-              data: {
-                parsedContent: pdfContent.markdown,
-                parsingStatus: "COMPLETED",
-                parsingError: null,
-              },
-              select: {
-                unit: true,
-              },
-            });
-
-            // Now trigger embedding using MaterialService (now public)
             await MaterialService.embedMaterialInBackground(
               courseMaterial.id,
-              pdfContent.markdown,
-              material.unit
+              input.parsedContent.markdown,
+              input.materialType === "UNIT_PDF" ? input.unit : 0
             );
           } catch (error) {
             logger.error(
               "CoordinatorRouter",
-              `Failed to process material ${courseMaterial.id}`,
+              `Failed to embed material ${courseMaterial.id}`,
               error instanceof Error ? error : new Error(String(error)),
               {
                 materialId: courseMaterial.id,
@@ -780,10 +775,8 @@ export const coordinatorRouter = createTRPCRouter({
           id: material.id,
           courseId: material.courseId,
           title: material.title,
-          filename: material.filePath.replace("uploads/", ""),
-          filePath: material.filePath,
+          filename: material.filePath, // Original filename (no file storage)
           originalName: material.title,
-          size: 0, // We don't store file size in DB, could be calculated if needed
           materialType: material.materialType,
           unit: material.unit,
           uploadedAt: material.createdAt.toISOString(),
@@ -943,41 +936,6 @@ export const coordinatorRouter = createTRPCRouter({
             id: input.materialId,
           },
         });
-        logger.info(
-          "CoordinatorRouter",
-          `Deleted material record: ${input.materialId}`,
-          {
-            materialId: input.materialId,
-          }
-        );
-
-        // 7. Delete the physical file from uploads folder
-        try {
-          const filePath = join(
-            process.cwd(),
-            "src",
-            material.filePath.replace("uploads/", "")
-          );
-          await unlink(filePath);
-          logger.info(
-            "CoordinatorRouter",
-            `Deleted physical file: ${filePath}`,
-            {
-              materialId: input.materialId,
-              filePath,
-            }
-          );
-        } catch (fileError) {
-          logger.warn("CoordinatorRouter", `Failed to delete physical file`, {
-            materialId: input.materialId,
-            filePath: material.filePath,
-            error:
-              fileError instanceof Error
-                ? fileError.message
-                : String(fileError),
-          });
-          // Continue even if file deletion fails
-        }
 
         logger.info(
           "CoordinatorRouter",
@@ -993,7 +951,7 @@ export const coordinatorRouter = createTRPCRouter({
 
         return {
           success: true,
-          filename: material.filePath.replace("uploads/", ""),
+          filename: material.filePath, // Original filename stored for reference
           deletedChunks: deletedChunks.count,
           deletedQuestions: deletedQuestions.count,
           deletedJobs: deletedJobs.count,
@@ -2424,12 +2382,12 @@ Respond naturally:
       }
     }),
 
-  // Validate question paper
+  // Validate question paper (accepts pre-parsed content)
   validateQuestionPaper: coordinatorProcedure
     .input(
       z.object({
         courseId: z.string(),
-        filename: z.string(),
+        questionPaperContent: z.string(), // Pre-parsed text content
         provider: z.enum(["GEMINI", "OLLAMA"]).optional(),
       })
     )
@@ -2467,10 +2425,10 @@ Respond naturally:
           validateQuestionPaper,
         } = await import("@/services/question-paper-validation.service");
 
-        // Validate the question paper
+        // Validate the question paper with pre-parsed content
         const result = await validateQuestionPaper(
           input.courseId,
-          `uploads/${input.filename}`,
+          input.questionPaperContent,
           input.provider
         );
 
@@ -2483,7 +2441,7 @@ Respond naturally:
           "CoordinatorRouter",
           "Failed to validate question paper",
           error instanceof Error ? error : new Error(String(error)),
-          { courseId: input.courseId, filename: input.filename }
+          { courseId: input.courseId }
         );
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",

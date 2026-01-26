@@ -139,11 +139,11 @@ export default function ValidateQuestionPaperPage() {
             const data = await response.json();
             setUploadProgress(100);
 
-            // Validate the uploaded question paper
+            // Validate the uploaded question paper using parsed content
             setValidating(true);
             validateMutation.mutate({
                 courseId: selectedCourse,
-                filename: data.filename,
+                questionPaperContent: data.parsedContent?.text || data.parsedContent?.markdown || "",
                 provider: selectedProvider,
             });
         } catch (error) {
