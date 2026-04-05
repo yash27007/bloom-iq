@@ -77,7 +77,7 @@ export function DataTableAdvanced({ initialData }: DataTableAdvancedProps) {
         lastName: string;
         email: string;
         facultyId: string;
-        role: "ADMIN" | "COURSE_COORDINATOR" | "MODULE_COORDINATOR" | "PROGRAM_COORDINATOR" | "CONTROLLER_OF_EXAMINATION";
+        role: "ADMIN" | "COURSE_COORDINATOR" | "MODULE_COORDINATOR" | "PROGRAM_COORDINATOR" | "HOD" | "DEAN";
         designation: "ASSISTANT_PROFESSOR" | "ASSOCIATE_PROFESSOR" | "PROFESSOR";
         password?: string;
     }) => {
@@ -108,7 +108,7 @@ export function DataTableAdvanced({ initialData }: DataTableAdvancedProps) {
         lastName: string;
         email: string;
         facultyId: string;
-        role: "ADMIN" | "COURSE_COORDINATOR" | "MODULE_COORDINATOR" | "PROGRAM_COORDINATOR" | "CONTROLLER_OF_EXAMINATION";
+        role: "ADMIN" | "COURSE_COORDINATOR" | "MODULE_COORDINATOR" | "PROGRAM_COORDINATOR" | "HOD" | "DEAN";
         designation: "ASSISTANT_PROFESSOR" | "ASSOCIATE_PROFESSOR" | "PROFESSOR";
     }>) => {
         if (!selectedUser) return
@@ -207,7 +207,8 @@ export function DataTableAdvanced({ initialData }: DataTableAdvancedProps) {
                             <SelectItem value="COURSE_COORDINATOR">Course Coordinator</SelectItem>
                             <SelectItem value="MODULE_COORDINATOR">Module Coordinator</SelectItem>
                             <SelectItem value="PROGRAM_COORDINATOR">Program Coordinator</SelectItem>
-                            <SelectItem value="CONTROLLER_OF_EXAMINATION">Controller</SelectItem>
+                            <SelectItem value="HOD">Head of Department</SelectItem>
+                            <SelectItem value="DEAN">Dean</SelectItem>
                         </SelectContent>
                     </Select>
                     <DropdownMenu>

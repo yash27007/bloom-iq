@@ -2,7 +2,7 @@ import { createTRPCRouter, baseProcedure } from "@/trpc/init";
 import { prisma } from "@/lib/prisma";
 import { signUpSchema } from "@/types/auth";
 import { hashPassword } from "@/lib/hash-password";
-import { PrismaClientKnownRequestError } from "@/generated/prisma/runtime/library";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/client";
 import { TRPCError } from "@trpc/server";
 export const userRouter = createTRPCRouter({
   signUp: baseProcedure.input(signUpSchema).mutation(async ({ input }) => {

@@ -192,7 +192,8 @@ export const RegisterForm = () => {
                                         <SelectItem value="COURSE_COORDINATOR">Course Coordinator</SelectItem>
                                         <SelectItem value="MODULE_COORDINATOR">Module Coordinator</SelectItem>
                                         <SelectItem value="PROGRAM_COORDINATOR">Program Coordinator</SelectItem>
-                                        <SelectItem value="CONTROLLER_OF_EXAMINATION">Controller of Examination</SelectItem>
+                                        <SelectItem value="HOD">Head of Department</SelectItem>
+                                        <SelectItem value="DEAN">Dean</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </FormControl>

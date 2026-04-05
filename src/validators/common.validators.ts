@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod";
-import { Role } from "@/generated/prisma";
+import { Role } from "@/generated/prisma/client";
 
 export const roleArray = Object.values(Role) as [Role, ...Role[]];
 
@@ -47,7 +47,7 @@ export const emailSchema = z.object({
 export function safeOrderBy<T extends string>(
   key: string | undefined,
   order: "asc" | "desc",
-  whitelist: readonly T[]
+  whitelist: readonly T[],
 ): Record<T, "asc" | "desc"> | undefined {
   if (!key) return undefined;
   if (whitelist.includes(key as T)) {

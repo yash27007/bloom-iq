@@ -20,6 +20,7 @@ import {
     DialogFooter,
     DialogHeader,
     DialogTitle,
+    DialogTrigger,
 } from "@/components/ui/dialog"
 import {
     AlertDialog,
@@ -49,6 +50,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
 
 const userFormSchema = z.object({
     firstName: z.string().min(2, "First name must be at least 2 characters"),
@@ -60,6 +62,8 @@ const userFormSchema = z.object({
         "COURSE_COORDINATOR",
         "MODULE_COORDINATOR",
         "PROGRAM_COORDINATOR",
+        "HOD",
+        "DEAN",
         "CONTROLLER_OF_EXAMINATION"
     ] as const),
     designation: z.enum([
@@ -68,6 +72,7 @@ const userFormSchema = z.object({
         "PROFESSOR"
     ] as const),
     password: z.string().min(6, "Password must be at least 6 characters").optional(),
+    departmentId: z.string().optional(),
     isActive: z.boolean(),
 })
 
@@ -79,9 +84,10 @@ type EditUserFormValues = z.infer<typeof editUserFormSchema>
 interface AddUserSheetProps {
     children: React.ReactNode
     onSubmit: (data: UserFormValues & { password: string }) => Promise<void>
+    departments?: Array<{ id: string; code: string; name: string }>
 }
 
-export function AddUserSheet({ children, onSubmit }: AddUserSheetProps) {
+export function AddUserSheet({ children, onSubmit, departments = [] }: AddUserSheetProps) {
     const [open, setOpen] = useState(false)
     const [isLoading, setIsLoading] = useState(false)
 
@@ -95,6 +101,7 @@ export function AddUserSheet({ children, onSubmit }: AddUserSheetProps) {
             role: "ADMIN",
             designation: "PROFESSOR",
             password: "",
+            departmentId: "none",
             isActive: true,
         },
     })
@@ -107,7 +114,11 @@ export function AddUserSheet({ children, onSubmit }: AddUserSheetProps) {
 
         setIsLoading(true)
         try {
-            await onSubmit({ ...data, password: data.password })
+            await onSubmit({
+                ...data,
+                departmentId: data.departmentId === "none" ? undefined : data.departmentId,
+                password: data.password,
+            })
             form.reset()
             setOpen(false)
         } catch (_error) {
@@ -222,6 +233,8 @@ export function AddUserSheet({ children, onSubmit }: AddUserSheetProps) {
                                                         <SelectItem value="COURSE_COORDINATOR">Course Coordinator</SelectItem>
                                                         <SelectItem value="MODULE_COORDINATOR">Module Coordinator</SelectItem>
                                                         <SelectItem value="PROGRAM_COORDINATOR">Program Coordinator</SelectItem>
+                                                        <SelectItem value="HOD">Head of Department</SelectItem>
+                                                        <SelectItem value="DEAN">Dean</SelectItem>
                                                         <SelectItem value="CONTROLLER_OF_EXAMINATION">Controller of Examination</SelectItem>
                                                     </SelectContent>
                                                 </Select>
@@ -252,6 +265,31 @@ export function AddUserSheet({ children, onSubmit }: AddUserSheetProps) {
                                         )}
                                     />
                                 </div>
+                                <FormField
+                                    control={form.control}
+                                    name="departmentId"
+                                    render={({ field }) => (
+                                        <FormItem className="space-y-2">
+                                            <FormLabel className="text-sm font-medium text-foreground">Department</FormLabel>
+                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                <FormControl>
+                                                    <SelectTrigger className="h-11 bg-background border-input focus:border-ring focus:ring-2 focus:ring-ring/20 transition-all">
+                                                        <SelectValue placeholder="Select department" />
+                                                    </SelectTrigger>
+                                                </FormControl>
+                                                <SelectContent>
+                                                    <SelectItem value="none">No department</SelectItem>
+                                                    {departments.map((department) => (
+                                                        <SelectItem key={department.id} value={department.id}>
+                                                            {department.code} - {department.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <FormMessage className="text-xs" />
+                                        </FormItem>
+                                    )}
+                                />
                                 <FormField
                                     control={form.control}
                                     name="isActive"
@@ -324,9 +362,10 @@ interface EditUserDialogProps {
     open: boolean
     onClose: () => void
     onSubmit: (data: Partial<EditUserFormValues>) => Promise<void>
+    departments?: Array<{ id: string; code: string; name: string }>
 }
 
-export function EditUserDialog({ user, open, onClose, onSubmit }: EditUserDialogProps) {
+export function EditUserDialog({ user, open, onClose, onSubmit, departments = [] }: EditUserDialogProps) {
     const [isLoading, setIsLoading] = useState(false)
 
     const form = useForm<EditUserFormValues>({
@@ -338,6 +377,7 @@ export function EditUserDialog({ user, open, onClose, onSubmit }: EditUserDialog
             facultyId: "",
             role: "COURSE_COORDINATOR",
             designation: "ASSISTANT_PROFESSOR",
+            departmentId: "none",
             isActive: true,
         },
     })
@@ -352,6 +392,7 @@ export function EditUserDialog({ user, open, onClose, onSubmit }: EditUserDialog
                 facultyId: user.facultyId,
                 role: user.role as EditUserFormValues['role'],
                 designation: user.designation as EditUserFormValues['designation'],
+                departmentId: user.department?.id || "none",
                 isActive: user.isActive,
             })
         }
@@ -360,7 +401,10 @@ export function EditUserDialog({ user, open, onClose, onSubmit }: EditUserDialog
     const handleSubmit = async (data: EditUserFormValues) => {
         setIsLoading(true)
         try {
-            await onSubmit(data)
+            await onSubmit({
+                ...data,
+                departmentId: data.departmentId === "none" ? undefined : data.departmentId,
+            })
             onClose()
         } catch (_error) {
             // Error is handled by parent component
@@ -467,6 +511,8 @@ export function EditUserDialog({ user, open, onClose, onSubmit }: EditUserDialog
                                                         <SelectItem value="COURSE_COORDINATOR">Course Coordinator</SelectItem>
                                                         <SelectItem value="MODULE_COORDINATOR">Module Coordinator</SelectItem>
                                                         <SelectItem value="PROGRAM_COORDINATOR">Program Coordinator</SelectItem>
+                                                        <SelectItem value="HOD">Head of Department</SelectItem>
+                                                        <SelectItem value="DEAN">Dean</SelectItem>
                                                         <SelectItem value="CONTROLLER_OF_EXAMINATION">Controller of Examination</SelectItem>
                                                     </SelectContent>
                                                 </Select>
@@ -497,6 +543,31 @@ export function EditUserDialog({ user, open, onClose, onSubmit }: EditUserDialog
                                         )}
                                     />
                                 </div>
+                                <FormField
+                                    control={form.control}
+                                    name="departmentId"
+                                    render={({ field }) => (
+                                        <FormItem className="space-y-2">
+                                            <FormLabel className="text-sm font-medium">Department</FormLabel>
+                                            <Select onValueChange={field.onChange} value={field.value}>
+                                                <FormControl>
+                                                    <SelectTrigger className="h-10 bg-background border-input focus:border-ring focus:ring-2 focus:ring-ring/20 transition-all">
+                                                        <SelectValue placeholder="Select department" />
+                                                    </SelectTrigger>
+                                                </FormControl>
+                                                <SelectContent>
+                                                    <SelectItem value="none">No department</SelectItem>
+                                                    {departments.map((department) => (
+                                                        <SelectItem key={department.id} value={department.id}>
+                                                            {department.code} - {department.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <FormMessage className="text-xs" />
+                                        </FormItem>
+                                    )}
+                                />
                                 <FormField
                                     control={form.control}
                                     name="isActive"
@@ -601,5 +672,291 @@ export function DeleteUserDialog({ user, open, onClose, onConfirm }: DeleteUserD
                 </AlertDialogFooter>
             </AlertDialogContent>
         </AlertDialog>
+    )
+}
+
+interface DepartmentOption {
+    id: string
+    code: string
+    name: string
+    description?: string | null
+    hod?: { id: string; firstName: string; lastName: string } | null
+    dean?: { id: string; firstName: string; lastName: string } | null
+    _count?: { members: number; courses: number }
+}
+
+interface LeaderOption {
+    id: string
+    firstName: string
+    lastName: string
+    facultyId: string
+}
+
+interface DepartmentManagementDialogProps {
+    children: React.ReactNode
+    departments: DepartmentOption[]
+    hodOptions: LeaderOption[]
+    deanOptions: LeaderOption[]
+    onCreate: (input: {
+        code: string
+        name: string
+        description?: string
+        hodId?: string
+        deanId?: string
+    }) => Promise<void>
+    onUpdate: (input: {
+        id: string
+        code?: string
+        name?: string
+        description?: string
+        hodId?: string | null
+        deanId?: string | null
+    }) => Promise<void>
+    onDelete: (id: string) => Promise<void>
+}
+
+export function DepartmentManagementDialog({
+    children,
+    departments,
+    hodOptions,
+    deanOptions,
+    onCreate,
+    onUpdate,
+    onDelete,
+}: DepartmentManagementDialogProps) {
+    const [open, setOpen] = useState(false)
+    const [isSaving, setIsSaving] = useState(false)
+    const [createCode, setCreateCode] = useState("")
+    const [createName, setCreateName] = useState("")
+    const [createDescription, setCreateDescription] = useState("")
+    const [createHodId, setCreateHodId] = useState("none")
+    const [createDeanId, setCreateDeanId] = useState("none")
+
+    const [editingDepartmentId, setEditingDepartmentId] = useState<string | null>(null)
+    const [editCode, setEditCode] = useState("")
+    const [editName, setEditName] = useState("")
+    const [editDescription, setEditDescription] = useState("")
+    const [editHodId, setEditHodId] = useState("none")
+    const [editDeanId, setEditDeanId] = useState("none")
+
+    const startEdit = (department: DepartmentOption) => {
+        setEditingDepartmentId(department.id)
+        setEditCode(department.code)
+        setEditName(department.name)
+        setEditDescription(department.description || "")
+        setEditHodId(department.hod?.id || "none")
+        setEditDeanId(department.dean?.id || "none")
+    }
+
+    const resetCreate = () => {
+        setCreateCode("")
+        setCreateName("")
+        setCreateDescription("")
+        setCreateHodId("none")
+        setCreateDeanId("none")
+    }
+
+    const handleCreate = async () => {
+        setIsSaving(true)
+        try {
+            await onCreate({
+                code: createCode.trim(),
+                name: createName.trim(),
+                description: createDescription.trim() || undefined,
+                hodId: createHodId === "none" ? undefined : createHodId,
+                deanId: createDeanId === "none" ? undefined : createDeanId,
+            })
+            resetCreate()
+        } finally {
+            setIsSaving(false)
+        }
+    }
+
+    const handleUpdate = async () => {
+        if (!editingDepartmentId) return
+        setIsSaving(true)
+        try {
+            await onUpdate({
+                id: editingDepartmentId,
+                code: editCode.trim(),
+                name: editName.trim(),
+                description: editDescription.trim() || undefined,
+                hodId: editHodId === "none" ? null : editHodId,
+                deanId: editDeanId === "none" ? null : editDeanId,
+            })
+            setEditingDepartmentId(null)
+        } finally {
+            setIsSaving(false)
+        }
+    }
+
+    return (
+        <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+                {children}
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                    <DialogTitle>Department Management</DialogTitle>
+                    <DialogDescription>
+                        Create departments and assign HoD and Dean for governance flow.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-6">
+                    <div className="rounded-lg border p-4 space-y-4">
+                        <h3 className="font-semibold">Create Department</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <Input
+                                placeholder="Department code (e.g., CSE)"
+                                value={createCode}
+                                onChange={(e) => setCreateCode(e.target.value)}
+                            />
+                            <Input
+                                placeholder="Department name"
+                                value={createName}
+                                onChange={(e) => setCreateName(e.target.value)}
+                            />
+                        </div>
+                        <Textarea
+                            placeholder="Description (optional)"
+                            value={createDescription}
+                            onChange={(e) => setCreateDescription(e.target.value)}
+                            rows={2}
+                        />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <Select value={createHodId} onValueChange={setCreateHodId}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Assign HoD" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">No HoD</SelectItem>
+                                    {hodOptions.map((hod) => (
+                                        <SelectItem key={hod.id} value={hod.id}>
+                                            {hod.firstName} {hod.lastName} ({hod.facultyId})
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Select value={createDeanId} onValueChange={setCreateDeanId}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Assign Dean" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">No Dean</SelectItem>
+                                    {deanOptions.map((dean) => (
+                                        <SelectItem key={dean.id} value={dean.id}>
+                                            {dean.firstName} {dean.lastName} ({dean.facultyId})
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="flex justify-end">
+                            <Button
+                                onClick={handleCreate}
+                                disabled={isSaving || !createCode.trim() || !createName.trim()}
+                            >
+                                Create Department
+                            </Button>
+                        </div>
+                    </div>
+
+                    <div className="rounded-lg border divide-y">
+                        {departments.length === 0 && (
+                            <div className="p-6 text-sm text-muted-foreground">
+                                No departments created yet.
+                            </div>
+                        )}
+                        {departments.map((department) => {
+                            const isEditing = editingDepartmentId === department.id
+
+                            if (isEditing) {
+                                return (
+                                    <div key={department.id} className="p-4 space-y-3">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <Input value={editCode} onChange={(e) => setEditCode(e.target.value)} />
+                                            <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                                        </div>
+                                        <Textarea
+                                            value={editDescription}
+                                            onChange={(e) => setEditDescription(e.target.value)}
+                                            rows={2}
+                                        />
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <Select value={editHodId} onValueChange={setEditHodId}>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Assign HoD" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="none">No HoD</SelectItem>
+                                                    {hodOptions.map((hod) => (
+                                                        <SelectItem key={hod.id} value={hod.id}>
+                                                            {hod.firstName} {hod.lastName} ({hod.facultyId})
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <Select value={editDeanId} onValueChange={setEditDeanId}>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Assign Dean" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="none">No Dean</SelectItem>
+                                                    {deanOptions.map((dean) => (
+                                                        <SelectItem key={dean.id} value={dean.id}>
+                                                            {dean.firstName} {dean.lastName} ({dean.facultyId})
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="flex justify-end gap-2">
+                                            <Button variant="outline" onClick={() => setEditingDepartmentId(null)}>
+                                                Cancel
+                                            </Button>
+                                            <Button
+                                                onClick={handleUpdate}
+                                                disabled={isSaving || !editCode.trim() || !editName.trim()}
+                                            >
+                                                Save
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )
+                            }
+
+                            return (
+                                <div key={department.id} className="p-4 flex items-start justify-between gap-4">
+                                    <div>
+                                        <div className="font-medium">{department.code} - {department.name}</div>
+                                        <div className="text-sm text-muted-foreground">
+                                            HoD: {department.hod ? `${department.hod.firstName} ${department.hod.lastName}` : "Not assigned"}
+                                        </div>
+                                        <div className="text-sm text-muted-foreground">
+                                            Dean: {department.dean ? `${department.dean.firstName} ${department.dean.lastName}` : "Not assigned"}
+                                        </div>
+                                        <div className="text-xs text-muted-foreground mt-1">
+                                            Members: {department._count?.members || 0} • Courses: {department._count?.courses || 0}
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <Button variant="outline" onClick={() => startEdit(department)}>
+                                            Edit
+                                        </Button>
+                                        <Button
+                                            variant="destructive"
+                                            onClick={() => onDelete(department.id)}
+                                        >
+                                            Delete
+                                        </Button>
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                </div>
+            </DialogContent>
+        </Dialog>
     )
 }

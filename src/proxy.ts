@@ -1,6 +1,6 @@
 /**
  * Next.js 16 Proxy (Auth Protection)
- * 
+ *
  * Uses Better Auth for session checking and role-based routing.
  * For performance, we use cookie-based checks in the proxy layer.
  * Full session validation happens in page/route handlers.
@@ -11,6 +11,7 @@ import type { NextRequest } from "next/server";
 import { getSessionCookie } from "better-auth/cookies";
 import {
   canAccessAdminRoutes,
+  canAccessCoeRoutes,
   canAccessCoordinatorRoutes,
   getDashboardRoute,
   type UserRole,
@@ -39,7 +40,7 @@ export async function proxy(request: NextRequest) {
 
   // Check if the route handles its own authentication
   const isSelfAuthRoute = selfAuthRoutes.some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`)
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
 
   if (isSelfAuthRoute) {
@@ -48,7 +49,7 @@ export async function proxy(request: NextRequest) {
 
   // Check if the route is public or starts with a public path
   const isPublicRoute = publicRoutes.some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`)
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
 
   if (isPublicRoute) {
@@ -87,13 +88,9 @@ export async function proxy(request: NextRequest) {
     // Role-based route protection
     const userRole = session.user.role as UserRole;
 
-    // Redirect COE users from /coe/dashboard to /coordinator/dashboard
+    // COE routes protection
     if (pathname.startsWith("/coe/dashboard")) {
-      if (userRole === "CONTROLLER_OF_EXAMINATION") {
-        // Replace /coe/dashboard with /coordinator/dashboard
-        const newPath = pathname.replace("/coe/dashboard", "/coordinator/dashboard");
-        return NextResponse.redirect(new URL(newPath, request.url));
-      } else {
+      if (!canAccessCoeRoutes(userRole)) {
         return NextResponse.redirect(new URL("/unauthorized", request.url));
       }
     }
@@ -119,7 +116,6 @@ export async function proxy(request: NextRequest) {
         return NextResponse.redirect(new URL(dashboardRoute, request.url));
       }
     }
-
   } catch (error) {
     // If session check fails, let the request through
     // Page handlers will do full validation

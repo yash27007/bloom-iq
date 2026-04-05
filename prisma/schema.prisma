@@ -5,7 +5,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ============================================
@@ -26,6 +25,7 @@ model User {
   password                  String? // Optional for social auth
   designation               Designation
   role                      Role
+  departmentId              String?
   isActive                  Boolean                   @default(true)
   // Timestamps
   createdAt                 DateTime                  @default(now())
@@ -37,6 +37,9 @@ model User {
   programCoordinatorCourses Course[]                  @relation("ProgramCoordinator")
   initiatedJobs             Question_Generation_Job[] @relation("InitiatedBy")
   chatHistory               Chat_History[]            @relation("UserChatHistory")
+  department                Department?               @relation("DepartmentMembers", fields: [departmentId], references: [id], onDelete: SetNull)
+  headedDepartments         Department[]              @relation("DepartmentHOD")
+  deanedDepartments         Department[]              @relation("DepartmentDean")
   // Better Auth relations
   sessions                  Session[]
   accounts                  Account[]
@@ -99,12 +102,14 @@ model Course {
   course_code            String                    @unique
   name                   String
   description            String
-  courseCoordinatorId    String                    @unique
-  moduleCoordinatorId    String                    @unique
-  programCoordinatorId   String                    @unique
+  departmentId           String?
+  courseCoordinatorId    String
+  moduleCoordinatorId    String
+  programCoordinatorId   String
   createdAt              DateTime                  @default(now())
   updatedAt              DateTime                  @updatedAt
   material               Course_Material[]
+  department             Department?               @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   courseCoordinator      User                      @relation("CourseCoordinator", fields: [courseCoordinatorId], references: [id], onDelete: Cascade)
   moduleCoordinator      User                      @relation("ModuleCoordinator", fields: [moduleCoordinatorId], references: [id], onDelete: Cascade)
   programCoordinator     User                      @relation("ProgramCoordinator", fields: [programCoordinatorId], references: [id], onDelete: Cascade)
@@ -113,7 +118,28 @@ model Course {
   patterns               QuestionPaperPattern[]
 
   @@index([course_code, id])
+  @@index([departmentId])
   @@map("courses")
+}
+
+model Department {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String   @unique
+  description String?
+  hodId       String?
+  deanId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  hod     User?    @relation("DepartmentHOD", fields: [hodId], references: [id], onDelete: SetNull)
+  dean    User?    @relation("DepartmentDean", fields: [deanId], references: [id], onDelete: SetNull)
+  members User[]   @relation("DepartmentMembers")
+  courses Course[]
+
+  @@index([hodId])
+  @@index([deanId])
+  @@map("departments")
 }
 
 model Course_Material {
@@ -164,33 +190,40 @@ model Material_Chunk {
 }
 
 model Question {
-  id              String              @id @default(uuid())
-  courseId        String
-  materialId      String? // Reference to source material
-  unit            Int                 @default(0)
-  question        String
-  answer          String
-  questionType    Question_Type
-  difficultyLevel DifficultyLevel     @default(MEDIUM)
-  bloomLevel      BloomLevel          @default(UNDERSTAND)
-  generationType  GenerationType      @default(DIRECT)
-  marks           Marks
-  status          QuestionStatus      @default(CREATED_BY_COURSE_COORDINATOR)
+  id                 String              @id @default(uuid())
+  courseId           String
+  materialId         String? // Reference to source material
+  unit               Int                 @default(0)
+  question           String
+  answer             String
+  questionType       Question_Type
+  difficultyLevel    DifficultyLevel     @default(MEDIUM)
+  bloomLevel         BloomLevel          @default(UNDERSTAND)
+  generationType     GenerationType      @default(DIRECT)
+  marks              Marks
+  status             QuestionStatus      @default(CREATED_BY_COURSE_COORDINATOR)
   // Review flags
-  reviewedByCc    Boolean             @default(false)
-  reviewedByMc    Boolean             @default(false)
-  reviewedByPc    Boolean             @default(false)
-  ccApprovedAt    DateTime?
-  mcApprovedAt    DateTime?
-  pcApprovedAt    DateTime?
+  reviewedByCc       Boolean             @default(false)
+  reviewedByMc       Boolean             @default(false)
+  reviewedByPc       Boolean             @default(false)
+  ccApprovedAt       DateTime?
+  mcApprovedAt       DateTime?
+  pcApprovedAt       DateTime?
   // Metadata
-  materialName    String?
-  isFinalized     Boolean             @default(false)
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  feedback        Question_Feedback[] @relation("QuestionOnFeedback")
-  course          Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  courseMaterial  Course_Material?    @relation(fields: [materialId], references: [id])
+  materialName       String?
+  isFinalized        Boolean             @default(false)
+  // Enhanced generation fields
+  academicLevel      AcademicLevel       @default(UG)
+  renderingType      RenderingType       @default(TEXT)
+  latexContent       String? // LaTeX formatted content
+  mermaidContent     String? // Mermaid diagram syntax
+  realWorldContext   String? // Real-world grounding reference
+  bloomJustification String? // Explanation for Bloom's level choice
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  feedback           Question_Feedback[] @relation("QuestionOnFeedback")
+  course             Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseMaterial     Course_Material?    @relation(fields: [materialId], references: [id])
 
   @@index([courseId, id, status])
   @@index([materialId])
@@ -247,6 +280,8 @@ enum Role {
   COURSE_COORDINATOR
   MODULE_COORDINATOR
   PROGRAM_COORDINATOR
+  HOD
+  DEAN
   CONTROLLER_OF_EXAMINATION
   ADMIN
 }
@@ -317,6 +352,23 @@ enum DifficultyLevel {
 }
 
 /// *
+///  * Academic level for difficulty scaling
+enum AcademicLevel {
+  UG // Undergraduate - Apply, Analyze focus
+  PG // Postgraduate - Evaluate, Create focus
+  PHD // Doctoral - Original synthesis, Research-level
+}
+
+/// *
+///  * Rendering type for rich media support
+enum RenderingType {
+  TEXT // Plain text only
+  LATEX // Contains LaTeX mathematical notation
+  MERMAID // Contains Mermaid diagram syntax
+  MIXED // Contains both LaTeX and Mermaid
+}
+
+/// *
 ///  * Bloom's taxonomy levels for learning objectives
 enum BloomLevel {
   REMEMBER
@@ -342,7 +394,8 @@ enum PatternStatus {
   DRAFT
   PENDING_MC_APPROVAL
   PENDING_PC_APPROVAL
-  PENDING_COE_APPROVAL
+  PENDING_HOD_APPROVAL
+  PENDING_DEAN_APPROVAL
   APPROVED
   REJECTED
 }
@@ -406,10 +459,15 @@ model QuestionPaperPattern {
   pcApprovedById String?
   pcRemarks      String?
 
-  coeApproved     Boolean   @default(false)
-  coeApprovedAt   DateTime?
-  coeApprovedById String?
-  coeRemarks      String?
+  hodApproved     Boolean   @default(false)
+  hodApprovedAt   DateTime?
+  hodApprovedById String?
+  hodRemarks      String?
+
+  deanApproved     Boolean   @default(false)
+  deanApprovedAt   DateTime?
+  deanApprovedById String?
+  deanRemarks      String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

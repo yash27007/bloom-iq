@@ -3,9 +3,9 @@ import { z } from "zod";
 import { createTRPCRouter, adminProcedure } from "@/trpc/init";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/hash-password";
-import { PrismaClientKnownRequestError } from "@/generated/prisma/runtime/library";
-import { Role } from "@/generated/prisma";
-import type { Prisma } from "@/generated/prisma";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/client";
+import { Role } from "@/generated/prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 import { signUpSchema } from "@/types/auth";
 
 /**
@@ -57,7 +57,7 @@ type CourseSortableKey = (typeof courseSortableKeys)[number];
 function safeOrderBy<T extends string>(
   key: string | undefined,
   order: "asc" | "desc",
-  whitelist: readonly T[]
+  whitelist: readonly T[],
 ): Record<T, "asc" | "desc"> | undefined {
   if (!key) return undefined;
   if (whitelist.includes(key as T)) {
@@ -112,6 +112,7 @@ const updateUserSchema = z.object({
   designation: z
     .enum(["ASSISTANT_PROFESSOR", "ASSOCIATE_PROFESSOR", "PROFESSOR"])
     .optional(),
+  departmentId: z.string().uuid().nullable().optional(),
   isActive: z.boolean().optional(),
 });
 
@@ -119,7 +120,7 @@ const listUsersInput = baseListInput.extend({
   role: z.enum(roleArray).optional(),
   sortBy: z
     .enum(
-      userSortableKeys as unknown as [UserSortableKey, ...UserSortableKey[]]
+      userSortableKeys as unknown as [UserSortableKey, ...UserSortableKey[]],
     )
     .optional(),
 });
@@ -129,6 +130,7 @@ const createCourseSchema = z.object({
   courseCode: z.string().min(2).max(20),
   courseName: z.string().min(2).max(200),
   description: z.string().min(1).max(1000).optional(),
+  departmentId: z.string().uuid(),
   courseCoordinatorId: z.string(),
   moduleCoordinatorId: z.string(),
   programCoordinatorId: z.string(),
@@ -139,9 +141,27 @@ const updateCourseSchema = z.object({
   courseCode: z.string().min(2).max(20).optional(),
   courseName: z.string().min(2).max(200).optional(),
   description: z.string().min(1).max(1000).optional(),
+  departmentId: z.string().uuid().optional(),
   courseCoordinatorId: z.string().optional(),
   moduleCoordinatorId: z.string().optional(),
   programCoordinatorId: z.string().optional(),
+});
+
+const createDepartmentSchema = z.object({
+  code: z.string().min(2).max(20),
+  name: z.string().min(2).max(200),
+  description: z.string().max(1000).optional(),
+  hodId: z.string().optional(),
+  deanId: z.string().optional(),
+});
+
+const updateDepartmentSchema = z.object({
+  id: z.string(),
+  code: z.string().min(2).max(20).optional(),
+  name: z.string().min(2).max(200).optional(),
+  description: z.string().max(1000).optional(),
+  hodId: z.string().nullable().optional(),
+  deanId: z.string().nullable().optional(),
 });
 
 const listCoursesInput = baseListInput.extend({
@@ -149,14 +169,15 @@ const listCoursesInput = baseListInput.extend({
     .enum(
       courseSortableKeys as unknown as [
         CourseSortableKey,
-        ...CourseSortableKey[]
-      ]
+        ...CourseSortableKey[],
+      ],
     )
     .optional(),
 });
 
 const eligibleCoordinatorInput = z.object({
   role: z.enum(roleArray).optional(),
+  departmentId: z.string().uuid().optional(),
 });
 
 const eligibleCoordinatorsForEditInput = z.object({
@@ -220,7 +241,7 @@ async function validateCoordinatorRoles(input: {
     if (!u.isActive) {
       fail(
         "BAD_REQUEST",
-        `Cannot assign inactive user ${u.firstName} ${u.lastName} as coordinator.`
+        `Cannot assign inactive user ${u.firstName} ${u.lastName} as coordinator.`,
       );
     }
 
@@ -228,7 +249,84 @@ async function validateCoordinatorRoles(input: {
     if (expected && u.role !== expected) {
       fail(
         "BAD_REQUEST",
-        `User ${u.firstName} ${u.lastName} must have role ${expected}, found ${u.role}.`
+        `User ${u.firstName} ${u.lastName} must have role ${expected}, found ${u.role}.`,
+      );
+    }
+  }
+}
+
+async function validateDepartmentCoordinatorAssignments(input: {
+  departmentId?: string;
+  courseCoordinatorId?: string;
+  moduleCoordinatorId?: string;
+  programCoordinatorId?: string;
+}) {
+  if (!input.departmentId) return;
+
+  const ids = [
+    input.courseCoordinatorId,
+    input.moduleCoordinatorId,
+    input.programCoordinatorId,
+  ].filter(Boolean) as string[];
+
+  if (ids.length === 0) return;
+
+  const users = await prisma.user.findMany({
+    where: { id: { in: ids } },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      departmentId: true,
+    },
+  });
+
+  for (const user of users) {
+    if (user.departmentId !== input.departmentId) {
+      fail(
+        "BAD_REQUEST",
+        `User ${user.firstName} ${user.lastName} is not part of the selected department.`,
+      );
+    }
+  }
+}
+
+async function validateDepartmentLeadershipRoles(input: {
+  hodId?: string;
+  deanId?: string;
+}) {
+  const ids = [input.hodId, input.deanId].filter(Boolean) as string[];
+  if (ids.length === 0) return;
+
+  const users = await prisma.user.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, role: true, firstName: true, lastName: true },
+  });
+
+  if (input.hodId) {
+    const hod = users.find((u) => u.id === input.hodId);
+    if (!hod) {
+      fail("BAD_REQUEST", "Selected HoD user does not exist.");
+      return;
+    }
+    if (hod.role !== Role.HOD) {
+      fail(
+        "BAD_REQUEST",
+        `User ${hod.firstName} ${hod.lastName} must have HOD role to be assigned as HoD.`,
+      );
+    }
+  }
+
+  if (input.deanId) {
+    const dean = users.find((u) => u.id === input.deanId);
+    if (!dean) {
+      fail("BAD_REQUEST", "Selected Dean user does not exist.");
+      return;
+    }
+    if (dean.role !== Role.DEAN) {
+      fail(
+        "BAD_REQUEST",
+        `User ${dean.firstName} ${dean.lastName} must have DEAN role to be assigned as Dean.`,
       );
     }
   }
@@ -263,6 +361,7 @@ export const adminRouter = createTRPCRouter({
           password: await hashPassword(input.password),
           role: input.role,
           designation: input.designation,
+          departmentId: input.departmentId,
         },
         select: {
           id: true,
@@ -272,6 +371,13 @@ export const adminRouter = createTRPCRouter({
           facultyId: true,
           role: true,
           designation: true,
+          department: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+            },
+          },
           isActive: true,
           createdAt: true,
           updatedAt: true,
@@ -338,6 +444,13 @@ export const adminRouter = createTRPCRouter({
           facultyId: true,
           role: true,
           designation: true,
+          department: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+            },
+          },
           isActive: true,
           createdAt: true,
           updatedAt: true,
@@ -381,6 +494,13 @@ export const adminRouter = createTRPCRouter({
           facultyId: true,
           role: true,
           designation: true,
+          department: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+            },
+          },
           isActive: true,
           createdAt: true,
           updatedAt: true,
@@ -413,6 +533,81 @@ export const adminRouter = createTRPCRouter({
     .mutation(async ({ input }) => {
       const { id, ...rest } = input;
 
+      const existingUser = await prisma.user.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          role: true,
+          departmentId: true,
+        },
+      });
+
+      if (!existingUser) {
+        fail("NOT_FOUND", "User not found.");
+      }
+
+      const nextRole = (rest.role ?? existingUser.role) as Role;
+      const nextDepartmentId =
+        rest.departmentId !== undefined
+          ? (rest.departmentId ?? null)
+          : existingUser.departmentId;
+
+      if (nextRole !== Role.ADMIN && !nextDepartmentId) {
+        fail("BAD_REQUEST", "Department is required for all faculty roles.");
+      }
+
+      if (nextDepartmentId) {
+        const [assignedCourse, headedDepartment, deanedDepartment] =
+          await Promise.all([
+            prisma.course.findFirst({
+              where: {
+                OR: [
+                  { courseCoordinatorId: id },
+                  { moduleCoordinatorId: id },
+                  { programCoordinatorId: id },
+                ],
+                departmentId: { not: nextDepartmentId },
+              },
+              select: { id: true, course_code: true },
+            }),
+            prisma.department.findFirst({
+              where: {
+                hodId: id,
+                id: { not: nextDepartmentId },
+              },
+              select: { id: true, code: true },
+            }),
+            prisma.department.findFirst({
+              where: {
+                deanId: id,
+                id: { not: nextDepartmentId },
+              },
+              select: { id: true, code: true },
+            }),
+          ]);
+
+        if (assignedCourse) {
+          fail(
+            "BAD_REQUEST",
+            `Cannot move user to a different department while assigned to course ${assignedCourse.course_code}.`,
+          );
+        }
+
+        if (headedDepartment) {
+          fail(
+            "BAD_REQUEST",
+            `Cannot move user to a different department while assigned as HoD of ${headedDepartment.code}.`,
+          );
+        }
+
+        if (deanedDepartment) {
+          fail(
+            "BAD_REQUEST",
+            `Cannot move user to a different department while assigned as Dean of ${deanedDepartment.code}.`,
+          );
+        }
+      }
+
       const data: Prisma.UserUpdateInput = {};
       if (rest.firstName !== undefined) data.firstName = rest.firstName;
       if (rest.lastName !== undefined) data.lastName = rest.lastName;
@@ -420,6 +615,11 @@ export const adminRouter = createTRPCRouter({
       if (rest.facultyId !== undefined) data.facultyId = rest.facultyId;
       if (rest.role !== undefined) data.role = rest.role;
       if (rest.designation !== undefined) data.designation = rest.designation;
+      if (rest.departmentId !== undefined) {
+        data.department = rest.departmentId
+          ? { connect: { id: rest.departmentId } }
+          : { disconnect: true };
+      }
       if (rest.isActive !== undefined) data.isActive = rest.isActive;
 
       if (Object.keys(data).length === 0)
@@ -437,6 +637,13 @@ export const adminRouter = createTRPCRouter({
             facultyId: true,
             role: true,
             designation: true,
+            department: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+              },
+            },
             isActive: true,
             updatedAt: true,
           },
@@ -474,6 +681,8 @@ export const adminRouter = createTRPCRouter({
               { courseCoordinatorId: input.id },
               { moduleCoordinatorId: input.id },
               { programCoordinatorId: input.id },
+              { department: { hodId: input.id } },
+              { department: { deanId: input.id } },
             ],
           },
         });
@@ -481,7 +690,7 @@ export const adminRouter = createTRPCRouter({
         if (blockingAssignments > 0) {
           fail(
             "BAD_REQUEST",
-            "Cannot delete a user who is assigned to courses. Reassign those courses first."
+            "Cannot delete a user who is assigned to courses. Reassign those courses first.",
           );
         }
 
@@ -560,6 +769,7 @@ export const adminRouter = createTRPCRouter({
     .input(createCourseSchema)
     .mutation(async ({ input }) => {
       await validateCoordinatorRoles(input);
+      await validateDepartmentCoordinatorAssignments(input);
 
       try {
         const course = await prisma.course.create({
@@ -567,6 +777,7 @@ export const adminRouter = createTRPCRouter({
             course_code: input.courseCode,
             name: input.courseName,
             description: input.description || "", // Add default description
+            departmentId: input.departmentId,
             courseCoordinatorId: input.courseCoordinatorId,
             moduleCoordinatorId: input.moduleCoordinatorId,
             programCoordinatorId: input.programCoordinatorId,
@@ -575,6 +786,13 @@ export const adminRouter = createTRPCRouter({
             id: true,
             course_code: true,
             name: true,
+            department: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+              },
+            },
             courseCoordinator: {
               select: {
                 id: true,
@@ -635,6 +853,14 @@ export const adminRouter = createTRPCRouter({
           { course_code: { contains: search, mode: "insensitive" } },
           { name: { contains: search, mode: "insensitive" } },
           {
+            department: {
+              OR: [
+                { code: { contains: search, mode: "insensitive" } },
+                { name: { contains: search, mode: "insensitive" } },
+              ],
+            },
+          },
+          {
             courseCoordinator: {
               OR: [
                 { firstName: { contains: search, mode: "insensitive" } },
@@ -674,6 +900,13 @@ export const adminRouter = createTRPCRouter({
             id: true,
             course_code: true,
             name: true,
+            department: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+              },
+            },
             courseCoordinator: {
               select: {
                 id: true,
@@ -732,6 +965,27 @@ export const adminRouter = createTRPCRouter({
           id: true,
           course_code: true,
           name: true,
+          department: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              hod: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+              dean: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+            },
+          },
           courseCoordinator: {
             select: {
               id: true,
@@ -788,12 +1042,39 @@ export const adminRouter = createTRPCRouter({
     .mutation(async ({ input }) => {
       const { id, ...rest } = input;
 
+      const existingCourse = await prisma.course.findUnique({
+        where: { id },
+        select: { departmentId: true },
+      });
+      if (!existingCourse) {
+        fail("NOT_FOUND", "Course not found.");
+        return;
+      }
+
+      const effectiveDepartmentId =
+        rest.departmentId !== undefined
+          ? rest.departmentId
+          : existingCourse.departmentId;
+
+      if (!effectiveDepartmentId) {
+        fail("BAD_REQUEST", "Department is required for every course.");
+      }
+
       await validateCoordinatorRoles(rest);
+      await validateDepartmentCoordinatorAssignments({
+        departmentId: effectiveDepartmentId,
+        courseCoordinatorId: rest.courseCoordinatorId,
+        moduleCoordinatorId: rest.moduleCoordinatorId,
+        programCoordinatorId: rest.programCoordinatorId,
+      });
 
       const data: Prisma.CourseUpdateInput = {};
       if (rest.courseCode !== undefined) data.course_code = rest.courseCode;
       if (rest.courseName !== undefined) data.name = rest.courseName;
       if (rest.description !== undefined) data.description = rest.description;
+      if (rest.departmentId !== undefined) {
+        data.department = { connect: { id: rest.departmentId } };
+      }
       if (rest.courseCoordinatorId !== undefined) {
         data.courseCoordinator = { connect: { id: rest.courseCoordinatorId } };
       }
@@ -817,6 +1098,13 @@ export const adminRouter = createTRPCRouter({
             id: true,
             course_code: true,
             name: true,
+            department: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+              },
+            },
             courseCoordinator: {
               select: {
                 id: true,
@@ -887,12 +1175,12 @@ export const adminRouter = createTRPCRouter({
 
         const totalRelated = Object.values(course._count).reduce(
           (a, b) => a + b,
-          0
+          0,
         );
         if (totalRelated > 0) {
           fail(
             "BAD_REQUEST",
-            "Cannot delete course with associated questions, materials, patterns, or generated papers. Remove them first."
+            "Cannot delete course with associated questions, materials, patterns, or generated papers. Remove them first.",
           );
         }
 
@@ -974,24 +1262,7 @@ export const adminRouter = createTRPCRouter({
       const where: Prisma.UserWhereInput = {
         isActive: true, // Only active users can be coordinators
         ...(input.role ? { role: input.role } : {}),
-        // Exclude users who are already assigned as coordinators in any role
-        AND: [
-          {
-            courseCoordinatorCourses: {
-              none: {}, // User is not a course coordinator for any course
-            },
-          },
-          {
-            moduleCoordinatorCourses: {
-              none: {}, // User is not a module coordinator for any course
-            },
-          },
-          {
-            programCoordinatorCourses: {
-              none: {}, // User is not a program coordinator for any course
-            },
-          },
-        ],
+        ...(input.departmentId ? { departmentId: input.departmentId } : {}),
       };
 
       const coordinators = await prisma.user.findMany({
@@ -1003,6 +1274,7 @@ export const adminRouter = createTRPCRouter({
           email: true,
           facultyId: true,
           role: true,
+          departmentId: true,
           isActive: true,
         },
         orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
@@ -1023,54 +1295,11 @@ export const adminRouter = createTRPCRouter({
   getEligibleCoordinatorsForEdit: adminProcedure
     .input(eligibleCoordinatorsForEditInput)
     .query(async ({ input }) => {
-      const { currentCourseId, role } = input;
+      const { role } = input;
 
       const where: Prisma.UserWhereInput = {
         isActive: true, // Only active users can be coordinators
         ...(role ? { role } : {}),
-        // Include unassigned users OR users currently assigned to this specific course
-        OR: [
-          // Unassigned users (not coordinators for any course)
-          {
-            AND: [
-              {
-                courseCoordinatorCourses: {
-                  none: {}, // User is not a course coordinator for any course
-                },
-              },
-              {
-                moduleCoordinatorCourses: {
-                  none: {}, // User is not a module coordinator for any course
-                },
-              },
-              {
-                programCoordinatorCourses: {
-                  none: {}, // User is not a program coordinator for any course
-                },
-              },
-            ],
-          },
-          // Current coordinators of this course
-          {
-            OR: [
-              {
-                courseCoordinatorCourses: {
-                  some: { id: currentCourseId },
-                },
-              },
-              {
-                moduleCoordinatorCourses: {
-                  some: { id: currentCourseId },
-                },
-              },
-              {
-                programCoordinatorCourses: {
-                  some: { id: currentCourseId },
-                },
-              },
-            ],
-          },
-        ],
       };
 
       const coordinators = await prisma.user.findMany({
@@ -1088,5 +1317,120 @@ export const adminRouter = createTRPCRouter({
       });
 
       return ok({ data: coordinators });
+    }),
+
+  // ==================== DEPARTMENT MANAGEMENT ====================
+  createDepartment: adminProcedure
+    .input(createDepartmentSchema)
+    .mutation(async ({ input }) => {
+      await validateDepartmentLeadershipRoles({
+        hodId: input.hodId,
+        deanId: input.deanId,
+      });
+
+      const department = await prisma.department.create({
+        data: {
+          code: input.code,
+          name: input.name,
+          description: input.description,
+          hodId: input.hodId,
+          deanId: input.deanId,
+        },
+      });
+
+      return ok({
+        data: department,
+        message: "Department created successfully.",
+      });
+    }),
+
+  getDepartments: adminProcedure.query(async () => {
+    const departments = await prisma.department.findMany({
+      orderBy: { name: "asc" },
+      include: {
+        hod: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        dean: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        _count: {
+          select: {
+            members: true,
+            courses: true,
+          },
+        },
+      },
+    });
+
+    return ok({ data: departments });
+  }),
+
+  updateDepartment: adminProcedure
+    .input(updateDepartmentSchema)
+    .mutation(async ({ input }) => {
+      const { id, ...rest } = input;
+      const data: Prisma.DepartmentUpdateInput = {};
+
+      await validateDepartmentLeadershipRoles({
+        hodId: rest.hodId === null ? undefined : rest.hodId,
+        deanId: rest.deanId === null ? undefined : rest.deanId,
+      });
+
+      if (rest.code !== undefined) data.code = rest.code;
+      if (rest.name !== undefined) data.name = rest.name;
+      if (rest.description !== undefined) data.description = rest.description;
+      if (rest.hodId !== undefined) {
+        data.hod = rest.hodId
+          ? { connect: { id: rest.hodId } }
+          : { disconnect: true };
+      }
+      if (rest.deanId !== undefined) {
+        data.dean = rest.deanId
+          ? { connect: { id: rest.deanId } }
+          : { disconnect: true };
+      }
+
+      const department = await prisma.department.update({
+        where: { id },
+        data,
+      });
+
+      return ok({
+        data: department,
+        message: "Department updated successfully.",
+      });
+    }),
+
+  deleteDepartment: adminProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ input }) => {
+      const linkedCourses = await prisma.course.count({
+        where: { departmentId: input.id },
+      });
+      const linkedUsers = await prisma.user.count({
+        where: { departmentId: input.id },
+      });
+
+      if (linkedCourses > 0 || linkedUsers > 0) {
+        fail(
+          "BAD_REQUEST",
+          "Cannot delete a department while users or courses are still assigned.",
+        );
+      }
+
+      await prisma.department.delete({ where: { id: input.id } });
+
+      return ok({ message: "Department deleted successfully." });
     }),
 });

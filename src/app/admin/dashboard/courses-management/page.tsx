@@ -10,6 +10,11 @@ function transformToClientCourse(course: {
     id: string;
     course_code: string;
     name: string;
+    department?: {
+        id: string;
+        code: string;
+        name: string;
+    } | null;
     courseCoordinator: {
         id: string;
         firstName: string;
@@ -44,6 +49,7 @@ function transformToClientCourse(course: {
         id: course.id,
         course_code: course.course_code,
         name: course.name,
+        department: course.department || null,
         courseCoordinator: course.courseCoordinator,
         moduleCoordinator: course.moduleCoordinator,
         programCoordinator: course.programCoordinator,
@@ -54,7 +60,7 @@ function transformToClientCourse(course: {
 export default async function CoursesManagement() {
     try {
         const caller = await createCaller();
-        const [response, courseCoordinators, moduleCoordinators, programCoordinators] = await Promise.all([
+        const [response, courseCoordinators, moduleCoordinators, programCoordinators, departmentsResponse] = await Promise.all([
             caller.admin.getCourses({
                 page: 1,
                 limit: 500, // Increased limit for better performance
@@ -62,6 +68,7 @@ export default async function CoursesManagement() {
             caller.admin.getEligibleCoordinators({ role: "COURSE_COORDINATOR" }),
             caller.admin.getEligibleCoordinators({ role: "MODULE_COORDINATOR" }),
             caller.admin.getEligibleCoordinators({ role: "PROGRAM_COORDINATOR" }),
+            caller.admin.getDepartments(),
         ]);
 
         const courses = (response.data || []).map(transformToClientCourse);
@@ -72,10 +79,17 @@ export default async function CoursesManagement() {
             programCoordinators: programCoordinators.data || [],
         };
 
+        const departments = departmentsResponse.data?.map((department) => ({
+            id: department.id,
+            code: department.code,
+            name: department.name,
+        })) || [];
+
         return (
             <CoursesManagementClient
                 initialData={courses}
                 coordinators={coordinators}
+                departments={departments}
             />
         );
     } catch (error) {
@@ -92,6 +106,7 @@ export default async function CoursesManagement() {
             <CoursesManagementClient
                 initialData={[]}
                 coordinators={emptyCoordinators}
+                departments={[]}
             />
         );
     }

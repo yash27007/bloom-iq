@@ -32,10 +32,11 @@ export const addCourseInputSchema = z.object({
     .max(20, "Course code cannot exceed 20 characters")
     .regex(
       /^[A-Z0-9-]+$/,
-      "Course code must contain only uppercase letters, numbers, and hyphens"
+      "Course code must contain only uppercase letters, numbers, and hyphens",
     ),
   name: z.string().min(3, "Course name must be at least 3 characters"),
   description: z.string().min(10, "Description must be at least 10 characters"),
+  departmentId: z.string().uuid("Invalid department ID").optional(),
   courseCoordinatorId: z.string().uuid("Invalid course coordinator ID"),
   moduleCoordinatorId: z.string().uuid("Invalid module coordinator ID"),
   programCoordinatorId: z.string().uuid("Invalid program coordinator ID"),
@@ -52,7 +53,7 @@ export const updateCourseInputSchema = z.object({
     .max(20, "Course code cannot exceed 20 characters")
     .regex(
       /^[A-Z0-9-]+$/,
-      "Course code must contain only uppercase letters, numbers, and hyphens"
+      "Course code must contain only uppercase letters, numbers, and hyphens",
     )
     .optional(),
   name: z
@@ -63,6 +64,7 @@ export const updateCourseInputSchema = z.object({
     .string()
     .min(10, "Description must be at least 10 characters")
     .optional(),
+  departmentId: z.string().uuid("Invalid department ID").optional(),
   courseCoordinatorId: z
     .string()
     .uuid("Invalid course coordinator ID")

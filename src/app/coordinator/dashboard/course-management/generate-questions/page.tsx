@@ -9,19 +9,27 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Plus, Info } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Loader2, Plus, Info, Globe, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { trpc } from '@/trpc/client';
+import { AcademicLevelToggle, type AcademicLevel } from '@/components/ui/academic-level-toggle';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 export default function GenerateQuestionsPage() {
     // State management
@@ -31,6 +39,11 @@ export default function GenerateQuestionsPage() {
     const [selectedProvider, setSelectedProvider] = useState<"GEMINI" | "OLLAMA">("OLLAMA");
     const [selectedModel, setSelectedModel] = useState<string>('mistral:7b');
     const [showAdvanced, setShowAdvanced] = useState(false);
+
+    // Academic level and enhancement options
+    const [academicLevel, setAcademicLevel] = useState<AcademicLevel>("UG");
+    const [enableWebSearch, setEnableWebSearch] = useState(false);
+    const [enableRichMedia, setEnableRichMedia] = useState(true);
 
     // tRPC queries
     const { data: courses = [], isLoading: coursesLoading } = trpc.coordinator.getCoursesForMaterialUpload.useQuery();
@@ -132,6 +145,9 @@ export default function GenerateQuestionsPage() {
             questionCounts: totalQuestions,
             bloomLevels: finalBloomLevels,
             questionTypes: finalQuestionTypes,
+            academicLevel: academicLevel,
+            enableWebSearch: enableWebSearch,
+            enableRichMedia: enableRichMedia,
         });
     };
 
@@ -248,8 +264,8 @@ export default function GenerateQuestionsPage() {
                         <CardContent>
                             <div className="space-y-2">
                                 <Label htmlFor="model">Model</Label>
-                                <Select 
-                                    value={selectedModel} 
+                                <Select
+                                    value={selectedModel}
                                     onValueChange={setSelectedModel}
                                     disabled={modelsLoading}
                                 >
@@ -270,6 +286,83 @@ export default function GenerateQuestionsPage() {
                                         Loading available models...
                                     </p>
                                 )}
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+
+                {/* Academic Level Selection */}
+                {selectedMaterial && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                Academic Level
+                                <TooltipProvider>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                                        </TooltipTrigger>
+                                        <TooltipContent className="max-w-xs">
+                                            <p>Choose the academic level to adjust question complexity and Bloom&apos;s Taxonomy focus.</p>
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </TooltipProvider>
+                            </CardTitle>
+                            <CardDescription>
+                                Adjust question complexity and cognitive focus based on academic level
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-6">
+                            <AcademicLevelToggle
+                                value={academicLevel}
+                                onChange={setAcademicLevel}
+                            />
+
+                            <Separator />
+
+                            {/* Enhancement Options */}
+                            <div className="space-y-4">
+                                <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">
+                                    Enhancement Options
+                                </h4>
+
+                                <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                                    <div className="flex items-center gap-3">
+                                        <Globe className="h-5 w-5 text-blue-500" />
+                                        <div>
+                                            <Label htmlFor="webSearch" className="font-medium cursor-pointer">
+                                                Real-World Grounding
+                                            </Label>
+                                            <p className="text-xs text-muted-foreground">
+                                                Search for current case studies and examples for hard questions
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <Switch
+                                        id="webSearch"
+                                        checked={enableWebSearch}
+                                        onCheckedChange={setEnableWebSearch}
+                                    />
+                                </div>
+
+                                <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                                    <div className="flex items-center gap-3">
+                                        <FileText className="h-5 w-5 text-purple-500" />
+                                        <div>
+                                            <Label htmlFor="richMedia" className="font-medium cursor-pointer">
+                                                Rich Content (LaTeX & Diagrams)
+                                            </Label>
+                                            <p className="text-xs text-muted-foreground">
+                                                Enable mathematical notation and diagram generation
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <Switch
+                                        id="richMedia"
+                                        checked={enableRichMedia}
+                                        onCheckedChange={setEnableRichMedia}
+                                    />
+                                </div>
                             </div>
                         </CardContent>
                     </Card>
@@ -367,7 +460,7 @@ export default function GenerateQuestionsPage() {
                             {showAdvanced && (
                                 <>
                                     <Separator />
-                                    
+
                                     {/* Bloom's Taxonomy */}
                                     <div>
                                         <h3 className="text-lg font-semibold mb-3">Bloom&apos;s Taxonomy Levels</h3>

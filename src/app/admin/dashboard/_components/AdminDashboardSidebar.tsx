@@ -4,6 +4,7 @@ import {
     Users,
     Library,
     NotepadText,
+    Building2,
     User2,
     PanelLeftOpen,
     LogOut,
@@ -49,6 +50,11 @@ const items = [
         title: "Course Management",
         url: "/admin/dashboard/courses-management",
         icon: Library,
+    },
+    {
+        title: "Manage Departments",
+        url: "/admin/dashboard/departments-management",
+        icon: Building2,
     },
     {
         title: "Question Papers",

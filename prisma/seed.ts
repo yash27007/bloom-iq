@@ -1,12 +1,15 @@
 /* prisma/seed.ts
-   Run with: npx ts-node prisma/seed.ts
-   or add to package.json -> "prisma": { "seed": "ts-node --transpile-only prisma/seed.ts" }
+   Run with: bun run prisma/seed.ts
+   Configured via prisma.config.ts migrations.seed
 */
 
 import { PrismaClient, Designation, Role } from "../src/generated/prisma";
+import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
 
-const prisma = new PrismaClient();
+// Create PostgreSQL adapter with direct TCP connection
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
+const prisma = new PrismaClient({ adapter });
 
 const firstNames = [
   "Alexander",
@@ -223,7 +226,7 @@ async function main() {
   const existingCount = await prisma.user.count();
   if (existingCount >= 50) {
     console.log(
-      `⚠️ Aborting: there are already ${existingCount} users in DB. If you want to reseed, clear users/courses first.`
+      `⚠️ Aborting: there are already ${existingCount} users in DB. If you want to reseed, clear users/courses first.`,
     );
     await prisma.$disconnect();
     return;
@@ -283,7 +286,7 @@ async function main() {
               attempt + 1
             } failed for index ${userIndex}: ${
               err?.message?.split("\n")[0] ?? err
-            }`
+            }`,
           );
           userIndex++;
         }
@@ -291,7 +294,7 @@ async function main() {
 
       if (!created) {
         console.error(
-          ` ❌ Failed to create user after ${triesMax} attempts (index ~${userIndex}). Skipping.`
+          ` ❌ Failed to create user after ${triesMax} attempts (index ~${userIndex}). Skipping.`,
         );
         continue;
       }
@@ -307,13 +310,13 @@ async function main() {
 
   // Sanity check: ensure we have at least some coordinators for course assignment
   const activeCourseCoordinators = users.filter(
-    (u) => u.role === Role.COURSE_COORDINATOR && u.isActive
+    (u) => u.role === Role.COURSE_COORDINATOR && u.isActive,
   );
   const activeModuleCoordinators = users.filter(
-    (u) => u.role === Role.MODULE_COORDINATOR && u.isActive
+    (u) => u.role === Role.MODULE_COORDINATOR && u.isActive,
   );
   const activeProgramCoordinators = users.filter(
-    (u) => u.role === Role.PROGRAM_COORDINATOR && u.isActive
+    (u) => u.role === Role.PROGRAM_COORDINATOR && u.isActive,
   );
 
   if (
@@ -322,7 +325,7 @@ async function main() {
     activeProgramCoordinators.length === 0
   ) {
     console.error(
-      "❌ Not enough active coordinators to assign to courses. Aborting course creation."
+      "❌ Not enough active coordinators to assign to courses. Aborting course creation.",
     );
     await prisma.$disconnect();
     return;
@@ -339,13 +342,13 @@ async function main() {
 
     // Find available coordinators (not already assigned to ANY course in ANY role)
     const availableCourseCoordinators = activeCourseCoordinators.filter(
-      (u) => !usedCoordinators.has(u.id)
+      (u) => !usedCoordinators.has(u.id),
     );
     const availableModuleCoordinators = activeModuleCoordinators.filter(
-      (u) => !usedCoordinators.has(u.id)
+      (u) => !usedCoordinators.has(u.id),
     );
     const availableProgramCoordinators = activeProgramCoordinators.filter(
-      (u) => !usedCoordinators.has(u.id)
+      (u) => !usedCoordinators.has(u.id),
     );
 
     // If we run out of any coordinator type, break the loop
@@ -357,10 +360,10 @@ async function main() {
       console.log(
         `⚠️  Stopping course creation at course ${i + 1}/${
           courseData.length
-        } due to insufficient available coordinators`
+        } due to insufficient available coordinators`,
       );
       console.log(
-        `   Available: Course(${availableCourseCoordinators.length}), Module(${availableModuleCoordinators.length}), Program(${availableProgramCoordinators.length})`
+        `   Available: Course(${availableCourseCoordinators.length}), Module(${availableModuleCoordinators.length}), Program(${availableProgramCoordinators.length})`,
       );
       break;
     }
@@ -375,7 +378,7 @@ async function main() {
     const uniqueIds = new Set(selectedIds);
     if (uniqueIds.size !== selectedIds.length) {
       console.log(
-        `⚠️  Skipping course ${c.code} - same user would be assigned multiple coordinator roles`
+        `⚠️  Skipping course ${c.code} - same user would be assigned multiple coordinator roles`,
       );
       continue;
     }
@@ -399,12 +402,12 @@ async function main() {
       });
       courses.push(createdCourse);
       console.log(
-        `   ✅ ${createdCourse.course_code} assigned -> course:${cc.email}, module:${mc.email}, program:${pc.email}`
+        `   ✅ ${createdCourse.course_code} assigned -> course:${cc.email}, module:${mc.email}, program:${pc.email}`,
       );
     } catch (err) {
       console.warn(
         `   ⚠️ Skipping course ${c.code}:`,
-        (err as any)?.message?.split("\n")[0] ?? err
+        (err as any)?.message?.split("\n")[0] ?? err,
       );
     }
   }
@@ -450,7 +453,7 @@ async function main() {
         materialsCreated++;
       } catch (_error) {
         console.warn(
-          `   ⚠️ Failed to create unit ${unit} material for ${course.course_code}`
+          `   ⚠️ Failed to create unit ${unit} material for ${course.course_code}`,
         );
       }
     }
@@ -472,28 +475,28 @@ async function main() {
     });
     console.log("\n🔎 Sample coordinator (and their related courses):");
     console.log(
-      `   ${sample?.firstName} ${sample?.lastName} (${sample?.email})`
+      `   ${sample?.firstName} ${sample?.lastName} (${sample?.email})`,
     );
     console.log(
       `   courseCoordinatorCourses: ${
         sample?.courseCoordinatorCourses
           ?.map((c: any) => c.course_code)
           .join(", ") || "none"
-      }`
+      }`,
     );
     console.log(
       `   moduleCoordinatorCourses: ${
         sample?.moduleCoordinatorCourses
           ?.map((c: any) => c.course_code)
           .join(", ") || "none"
-      }`
+      }`,
     );
     console.log(
       `   programCoordinatorCourses: ${
         sample?.programCoordinatorCourses
           ?.map((c: any) => c.course_code)
           .join(", ") || "none"
-      }`
+      }`,
     );
   }
 
@@ -502,13 +505,13 @@ async function main() {
   console.log("SEED SUMMARY:");
   console.log(`  Total seeded users: ${users.length}`);
   console.log(
-    `  Active course coordinators: ${activeCourseCoordinators.length}`
+    `  Active course coordinators: ${activeCourseCoordinators.length}`,
   );
   console.log(
-    `  Active module coordinators: ${activeModuleCoordinators.length}`
+    `  Active module coordinators: ${activeModuleCoordinators.length}`,
   );
   console.log(
-    `  Active program coordinators: ${activeProgramCoordinators.length}`
+    `  Active program coordinators: ${activeProgramCoordinators.length}`,
   );
   console.log(`  Total courses created: ${courses.length}`);
   console.log(`  Total course materials created: ${materialsCreated}`);

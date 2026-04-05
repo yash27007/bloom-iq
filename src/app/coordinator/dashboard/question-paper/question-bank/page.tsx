@@ -48,9 +48,10 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
-import { Loader2, Search, Edit, Trash2, CheckCircle2, Filter, Download, FileText } from "lucide-react";
+import { Loader2, Search, Edit, Trash2, CheckCircle2, Filter, Download, FileText, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { exportQuestionsFromBank } from "@/lib/pdf-export";
+import { RichContentRenderer } from "@/components/ui/rich-content-renderer";
 
 // Question type - flexible to match different API returns
 type Question = {
@@ -88,6 +89,7 @@ export default function QuestionBankPage() {
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [questionToEdit, setQuestionToEdit] = useState<Question | null>(null);
     const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
+    const [isRegeneratingAnswer, setIsRegeneratingAnswer] = useState(false);
 
     // Get user's courses
     const { data: coursesData } = trpc.coordinator.getCoursesForMaterialUpload.useQuery();
@@ -189,6 +191,23 @@ export default function QuestionBankPage() {
         },
     });
 
+    const regenerateAnswerMutation = trpc.questionBank.regenerateAnswer.useMutation({
+        onSuccess: (data: { answer: string }) => {
+            if (!questionToEdit) return;
+            setQuestionToEdit({
+                ...questionToEdit,
+                answer: data.answer,
+            });
+            toast.success("Answer regenerated successfully");
+        },
+        onError: (error: { message?: string }) => {
+            toast.error(error.message || "Failed to regenerate answer");
+        },
+        onSettled: () => {
+            setIsRegeneratingAnswer(false);
+        },
+    });
+
     // Handlers
     const handleEditQuestion = (question: Question) => {
         setQuestionToEdit(question);
@@ -222,8 +241,17 @@ export default function QuestionBankPage() {
             marks: questionToEdit.marks,
             difficultyLevel: questionToEdit.difficultyLevel,
             bloomLevel: questionToEdit.bloomLevel,
-            questionType: questionToEdit.generationType as "DIRECT" | "INDIRECT" | "SCENARIO_BASED" | "PROBLEM_BASED",
+            questionType: questionToEdit.questionType as "DIRECT" | "INDIRECT" | "SCENARIO_BASED" | "PROBLEM_BASED",
             unit: questionToEdit.unit,
+        });
+    };
+
+    const handleRegenerateAnswer = () => {
+        if (!questionToEdit) return;
+        setIsRegeneratingAnswer(true);
+        regenerateAnswerMutation.mutate({
+            questionId: questionToEdit.id,
+            questionText: questionToEdit.question,
         });
     };
 
@@ -794,6 +822,10 @@ export default function QuestionBankPage() {
                                     }
                                     rows={4}
                                 />
+                                <div className="text-xs text-muted-foreground">Preview:</div>
+                                <div className="p-3 rounded-md bg-muted/50 text-sm">
+                                    <RichContentRenderer content={questionToEdit.question} />
+                                </div>
                             </div>
                             <div className="space-y-2">
                                 <Label>Answer</Label>
@@ -807,6 +839,10 @@ export default function QuestionBankPage() {
                                     }
                                     rows={6}
                                 />
+                                <div className="text-xs text-muted-foreground">Preview:</div>
+                                <div className="p-3 rounded-md bg-muted/50 text-sm">
+                                    <RichContentRenderer content={questionToEdit.answer} />
+                                </div>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
@@ -911,6 +947,23 @@ export default function QuestionBankPage() {
                         </div>
                     )}
                     <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={handleRegenerateAnswer}
+                            disabled={isRegeneratingAnswer || updateMutation.isPending}
+                        >
+                            {isRegeneratingAnswer ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Regenerating...
+                                </>
+                            ) : (
+                                <>
+                                    <Sparkles className="mr-2 h-4 w-4" />
+                                    Regenerate Answer
+                                </>
+                            )}
+                        </Button>
                         <Button
                             variant="outline"
                             onClick={() => setEditDialogOpen(false)}

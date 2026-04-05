@@ -1,13 +1,13 @@
 "use client"
 import {
     Home,
+    Eye,
     Upload,
     FileCheck,
     Layout,
     User2,
     PanelLeftOpen,
     LogOut,
-    Plus,
     MessageSquare,
     FileSearch,
     ClipboardCheck,
@@ -43,7 +43,7 @@ import { cn } from "@/lib/utils";
 import { logout } from "@/actions/auth";
 
 // Role-based navigation configuration
-type UserRole = "COURSE_COORDINATOR" | "MODULE_COORDINATOR" | "PROGRAM_COORDINATOR" | "CONTROLLER_OF_EXAMINATION" | "ADMIN";
+type UserRole = "COURSE_COORDINATOR" | "MODULE_COORDINATOR" | "PROGRAM_COORDINATOR" | "HOD" | "DEAN" | "ADMIN";
 
 interface NavigationItem {
     title: string;
@@ -54,13 +54,7 @@ interface NavigationItem {
 
 // Navigation items organized by groups with role-based visibility
 const navigationItems = {
-    main: [
-        {
-            title: "Home",
-            url: "/coordinator/dashboard",
-            icon: Home,
-        }
-    ] as NavigationItem[],
+    main: [] as NavigationItem[],
     courseManagement: [
         {
             title: "Upload Material",
@@ -110,22 +104,42 @@ const navigationItems = {
             title: "Approve Patterns",
             url: "/coordinator/dashboard/question-paper/approve-patterns",
             icon: FileCheck,
-            roles: ["MODULE_COORDINATOR", "PROGRAM_COORDINATOR", "CONTROLLER_OF_EXAMINATION"],
+            roles: ["MODULE_COORDINATOR", "PROGRAM_COORDINATOR"],
+        },
+        {
+            title: "Generate Paper",
+            url: "/coe/dashboard/generate-paper",
+            icon: FaFilePen,
+            roles: ["HOD"],
+        },
+        {
+            title: "View Papers",
+            url: "/coe/dashboard/view-papers",
+            icon: Eye,
+            roles: ["HOD", "DEAN"],
         },
         {
             title: "Validate Question Paper",
             url: "/coordinator/dashboard/question-paper/validate",
             icon: FileSearch,
-            roles: ["COURSE_COORDINATOR", "MODULE_COORDINATOR", "PROGRAM_COORDINATOR"],
+            roles: ["COURSE_COORDINATOR"],
         },
-        {
-            title: "Generate Question Paper",
-            url: "/coordinator/dashboard/generate-paper",
-            icon: Plus,
-            roles: ["CONTROLLER_OF_EXAMINATION"],
-        }
     ] as NavigationItem[]
 };
+
+function getMainNavigation(userRole?: string): NavigationItem[] {
+    const role = userRole as UserRole | undefined;
+
+    if (role === "HOD") {
+        return [{ title: "Home", url: "/coordinator/dashboard/hod", icon: Home }];
+    }
+
+    if (role === "DEAN") {
+        return [{ title: "Home", url: "/coordinator/dashboard/dean", icon: Home }];
+    }
+
+    return [{ title: "Home", url: "/coordinator/dashboard", icon: Home }];
+}
 
 /**
  * Filter navigation items based on user role
@@ -177,11 +191,12 @@ const MenuItemWithTooltip = ({ item, isCollapsed }: { item: NavigationItem; isCo
 export const CoordinatorDashboardSidebar = ({ user }: CoordinatorDashboardSidebarProps) => {
     const { state } = useSidebar();
     const isCollapsed = state === "collapsed";
-    
+    const visibleMain = getMainNavigation(user?.role);
+
     // Get filtered navigation items based on user role
     const visibleCourseManagement = getVisibleItems(navigationItems.courseManagement, user?.role);
     const visibleQuestionPaper = getVisibleItems(navigationItems.questionPaper, user?.role);
-    
+
     return (
         <Sidebar collapsible="icon" className="group/sidebar">
             <SidebarHeader className="py-4">
@@ -231,7 +246,7 @@ export const CoordinatorDashboardSidebar = ({ user }: CoordinatorDashboardSideba
                     <SidebarGroupLabel>Dashboard</SidebarGroupLabel>
                     <SidebarGroupContent>
                         <SidebarMenu>
-                            {navigationItems.main.map((item) => (
+                            {visibleMain.map((item) => (
                                 <MenuItemWithTooltip
                                     key={item.title}
                                     item={item}

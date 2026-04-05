@@ -13,7 +13,11 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ColumnDef } from "@tanstack/react-table";
-import { AddUserSheet, EditUserDialog, DeleteUserDialog } from "./user-management-components";
+import {
+    AddUserSheet,
+    EditUserDialog,
+    DeleteUserDialog,
+} from "./user-management-components";
 import { useState } from "react";
 import { trpc } from "@/trpc/client";
 import { useRouter } from "next/navigation";
@@ -28,6 +32,7 @@ interface ClientUser {
     email: string;
     role: string;
     designation: string;
+    department?: { id: string; code: string; name: string } | null;
     isActive: boolean;
     createdAt: Date;
     courseCoordinatorCourses?: Array<{ id: string; name: string; course_code: string }>;
@@ -37,9 +42,18 @@ interface ClientUser {
 
 interface UsersManagementClientProps {
     initialData: ClientUser[];
+    departments: Array<{
+        id: string;
+        code: string;
+        name: string;
+        description?: string | null;
+        hod?: { id: string; firstName: string; lastName: string } | null;
+        dean?: { id: string; firstName: string; lastName: string } | null;
+        _count?: { members: number; courses: number };
+    }>;
 }
 
-export function UsersManagementClient({ initialData }: UsersManagementClientProps) {
+export function UsersManagementClient({ initialData, departments }: UsersManagementClientProps) {
     const [selectedUser, setSelectedUser] = useState<ClientUser | null>(null);
     const [editDialogOpen, setEditDialogOpen] = useState(false);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -121,8 +135,10 @@ export function UsersManagementClient({ initialData }: UsersManagementClientProp
                             return "bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0 shadow-md hover:shadow-lg hover:from-green-600 hover:to-emerald-700 transition-all duration-200";
                         case "PROGRAM_COORDINATOR":
                             return "bg-gradient-to-r from-purple-500 to-violet-600 text-white border-0 shadow-md hover:shadow-lg hover:from-purple-600 hover:to-violet-700 transition-all duration-200";
-                        case "CONTROLLER_OF_EXAMINATION":
+                        case "HOD":
                             return "bg-gradient-to-r from-orange-500 to-amber-600 text-white border-0 shadow-md hover:shadow-lg hover:from-orange-600 hover:to-amber-700 transition-all duration-200";
+                        case "DEAN":
+                            return "bg-gradient-to-r from-teal-500 to-cyan-600 text-white border-0 shadow-md hover:shadow-lg hover:from-teal-600 hover:to-cyan-700 transition-all duration-200";
                         default:
                             return "bg-gradient-to-r from-gray-500 to-slate-600 text-white border-0 shadow-md";
                     }
@@ -136,8 +152,10 @@ export function UsersManagementClient({ initialData }: UsersManagementClientProp
                             return "Module Coordinator";
                         case "PROGRAM_COORDINATOR":
                             return "Program Coordinator";
-                        case "CONTROLLER_OF_EXAMINATION":
-                            return "Controller of Examination";
+                        case "HOD":
+                            return "Head of Department";
+                        case "DEAN":
+                            return "Dean";
                         case "ADMIN":
                             return "Administrator";
                         default:
@@ -155,6 +173,23 @@ export function UsersManagementClient({ initialData }: UsersManagementClientProp
                         <div className="text-xs text-muted-foreground font-medium">
                             {designation.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, l => l.toUpperCase())}
                         </div>
+                    </div>
+                );
+            },
+        },
+        {
+            id: "department",
+            header: "Department",
+            cell: ({ row }) => {
+                const department = row.original.department;
+                if (!department) {
+                    return <span className="text-xs text-muted-foreground italic">Not assigned</span>;
+                }
+
+                return (
+                    <div className="flex flex-col gap-0.5">
+                        <div className="text-sm font-medium">{department.name}</div>
+                        <div className="text-xs text-muted-foreground">{department.code}</div>
                     </div>
                 );
             },
@@ -339,6 +374,8 @@ export function UsersManagementClient({ initialData }: UsersManagementClientProp
                             { label: "Course Coordinator", value: "COURSE_COORDINATOR" },
                             { label: "Module Coordinator", value: "MODULE_COORDINATOR" },
                             { label: "Program Coordinator", value: "PROGRAM_COORDINATOR" },
+                            { label: "Head of Department", value: "HOD" },
+                            { label: "Dean", value: "DEAN" },
                             { label: "Controller of Examination", value: "CONTROLLER_OF_EXAMINATION" },
                         ]
                     },
@@ -356,6 +393,7 @@ export function UsersManagementClient({ initialData }: UsersManagementClientProp
                     description: "Get started by creating your first user account.",
                     action: (
                         <AddUserSheet
+                            departments={departments}
                             onSubmit={async (data) => {
                                 try {
                                     const result = await addUserMutation.mutateAsync(data);
@@ -379,6 +417,7 @@ export function UsersManagementClient({ initialData }: UsersManagementClientProp
 
             {/* Hidden trigger for the add button in the toolbar */}
             <AddUserSheet
+                departments={departments}
                 onSubmit={async (data) => {
                     try {
                         const result = await addUserMutation.mutateAsync(data);
@@ -400,6 +439,7 @@ export function UsersManagementClient({ initialData }: UsersManagementClientProp
                     <EditUserDialog
                         user={selectedUser}
                         open={editDialogOpen}
+                        departments={departments}
                         onClose={() => {
                             setEditDialogOpen(false);
                             setSelectedUser(null);

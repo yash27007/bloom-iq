@@ -3,7 +3,7 @@ import {
   coordinatorProcedure,
   courseCoordinatorProcedure,
   createTRPCRouter,
-  controllerOfExamination,
+  paperCommitteeProcedure,
 } from "../init";
 import {
   createPatternSchema,
@@ -17,8 +17,41 @@ import {
   semesterTypeArray,
 } from "@/validators/pattern.validators";
 import { TRPCError } from "@trpc/server";
-import type { Prisma } from "@/generated/prisma";
+import type { Prisma } from "@/generated/prisma/client";
 import { z } from "zod";
+
+function canManagePatternForRole(
+  userRole: string,
+  userId: string,
+  course: {
+    departmentId?: string | null;
+    courseCoordinatorId: string;
+    moduleCoordinatorId: string;
+    programCoordinatorId: string;
+    department: { hodId: string | null; deanId: string | null } | null;
+  },
+) {
+  if (userRole === "COURSE_COORDINATOR") {
+    return course.courseCoordinatorId === userId;
+  }
+  if (userRole === "MODULE_COORDINATOR") {
+    return course.moduleCoordinatorId === userId;
+  }
+  if (userRole === "PROGRAM_COORDINATOR") {
+    return course.programCoordinatorId === userId;
+  }
+  if (userRole === "HOD") {
+    return course.department?.hodId === userId;
+  }
+  if (userRole === "DEAN") {
+    return course.department?.deanId === userId;
+  }
+  if (userRole === "CONTROLLER_OF_EXAMINATION") {
+    return true;
+  }
+
+  return false;
+}
 
 /**
  * Pattern Router
@@ -41,6 +74,19 @@ export const patternRouter = createTRPCRouter({
       const userId = ctx.session.user.id;
       const userRole = ctx.session.user.role;
 
+      const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { departmentId: true },
+      });
+
+      if (!currentUser?.departmentId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            "Assign your faculty account to a department before creating patterns",
+        });
+      }
+
       // Only Course Coordinator can create patterns
       if (userRole !== "COURSE_COORDINATOR") {
         throw new TRPCError({
@@ -52,13 +98,27 @@ export const patternRouter = createTRPCRouter({
       // Verify user is the course coordinator for this course
       const course = await prisma.course.findUnique({
         where: { id: input.courseId },
-        select: { courseCoordinatorId: true },
+        select: {
+          courseCoordinatorId: true,
+          departmentId: true,
+        },
       });
 
       if (!course || course.courseCoordinatorId !== userId) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "You are not the coordinator for this course",
+        });
+      }
+
+      if (
+        !course.departmentId ||
+        course.departmentId !== currentUser.departmentId
+      ) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            "You can only create patterns for courses in your department",
         });
       }
 
@@ -97,9 +157,9 @@ export const patternRouter = createTRPCRouter({
     }),
 
   /**
-   * Update an existing pattern (only in DRAFT or REJECTED status)
+   * Update an existing pattern (allowed for all scoped roles)
    */
-  updatePattern: courseCoordinatorProcedure
+  updatePattern: coordinatorProcedure
     .input(updatePatternSchema)
     .mutation(async ({ ctx, input }) => {
       if (!ctx.session) {
@@ -110,6 +170,27 @@ export const patternRouter = createTRPCRouter({
       }
 
       const userId = ctx.session.user.id;
+      const userRole = ctx.session.user.role;
+
+      const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { departmentId: true },
+      });
+
+      if (
+        (userRole === "COURSE_COORDINATOR" ||
+          userRole === "MODULE_COORDINATOR" ||
+          userRole === "PROGRAM_COORDINATOR" ||
+          userRole === "HOD" ||
+          userRole === "DEAN") &&
+        !currentUser?.departmentId
+      ) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            "Assign your faculty account to a department before editing patterns",
+        });
+      }
 
       // Get the pattern
       const pattern = await prisma.questionPaperPattern.findUnique({
@@ -117,7 +198,16 @@ export const patternRouter = createTRPCRouter({
         include: {
           course: {
             select: {
+              departmentId: true,
               courseCoordinatorId: true,
+              moduleCoordinatorId: true,
+              programCoordinatorId: true,
+              department: {
+                select: {
+                  hodId: true,
+                  deanId: true,
+                },
+              },
             },
           },
         },
@@ -130,19 +220,86 @@ export const patternRouter = createTRPCRouter({
         });
       }
 
-      // Verify ownership
-      if (pattern.course.courseCoordinatorId !== userId) {
+      if (!canManagePatternForRole(userRole, userId, pattern.course)) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You are not the coordinator for this course",
+          message: "You do not have permission to edit this pattern",
         });
       }
 
-      // Can only edit DRAFT or REJECTED patterns
-      if (pattern.status !== "DRAFT" && pattern.status !== "REJECTED") {
+      if (
+        (userRole === "COURSE_COORDINATOR" ||
+          userRole === "MODULE_COORDINATOR" ||
+          userRole === "PROGRAM_COORDINATOR" ||
+          userRole === "HOD" ||
+          userRole === "DEAN") &&
+        pattern.course.departmentId !== currentUser?.departmentId
+      ) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You can only edit patterns within your department",
+        });
+      }
+
+      if (input.courseId && input.courseId !== pattern.courseId) {
+        const targetCourse = await prisma.course.findUnique({
+          where: { id: input.courseId },
+          select: {
+            departmentId: true,
+            courseCoordinatorId: true,
+            moduleCoordinatorId: true,
+            programCoordinatorId: true,
+            department: {
+              select: {
+                hodId: true,
+                deanId: true,
+              },
+            },
+          },
+        });
+
+        if (
+          !targetCourse ||
+          !canManagePatternForRole(userRole, userId, targetCourse)
+        ) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message:
+              "You do not have permission to move this pattern to the selected course",
+          });
+        }
+
+        if (
+          (userRole === "COURSE_COORDINATOR" ||
+            userRole === "MODULE_COORDINATOR" ||
+            userRole === "PROGRAM_COORDINATOR" ||
+            userRole === "HOD" ||
+            userRole === "DEAN") &&
+          targetCourse.departmentId !== currentUser?.departmentId
+        ) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "You can only move patterns to courses in your department",
+          });
+        }
+      }
+
+      const nextExamType = input.examType || pattern.examType;
+      const nextTotalMarks = input.totalMarks || pattern.totalMarks;
+
+      if (nextExamType === "END_SEMESTER" && nextTotalMarks !== 100) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Can only edit patterns in DRAFT or REJECTED status",
+          message: "End Semester patterns must have 100 total marks",
+        });
+      }
+      if (
+        (nextExamType === "SESSIONAL_1" || nextExamType === "SESSIONAL_2") &&
+        nextTotalMarks !== 50
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Sessional patterns must have 50 total marks",
         });
       }
 
@@ -150,8 +307,12 @@ export const patternRouter = createTRPCRouter({
       const updatedPattern = await prisma.questionPaperPattern.update({
         where: { id: input.id },
         data: {
+          courseId: input.courseId,
           patternName: input.patternName,
           academicYear: input.academicYear,
+          semesterType: input.semesterType,
+          examType: input.examType,
+          totalMarks: input.totalMarks,
           duration: input.duration,
           partAStructure: input.partAStructure
             ? (input.partAStructure as Prisma.InputJsonValue)
@@ -160,9 +321,24 @@ export const patternRouter = createTRPCRouter({
             ? (input.partBStructure as Prisma.InputJsonValue)
             : undefined,
           instructions: input.instructions,
-          // Reset status to pending MC approval if it was rejected
-          status:
-            pattern.status === "REJECTED" ? "PENDING_MC_APPROVAL" : undefined,
+          // Any modification restarts the approval chain.
+          status: "PENDING_MC_APPROVAL",
+          mcApproved: false,
+          pcApproved: false,
+          hodApproved: false,
+          deanApproved: false,
+          mcApprovedAt: null,
+          pcApprovedAt: null,
+          hodApprovedAt: null,
+          deanApprovedAt: null,
+          mcApprovedById: null,
+          pcApprovedById: null,
+          hodApprovedById: null,
+          deanApprovedById: null,
+          mcRemarks: null,
+          pcRemarks: null,
+          hodRemarks: null,
+          deanRemarks: null,
         },
         include: {
           course: {
@@ -195,14 +371,108 @@ export const patternRouter = createTRPCRouter({
       }
 
       const { page, limit, courseId, examType, semesterType, status } = input;
+      const userId = ctx.session.user.id;
+      const userRole = ctx.session.user.role;
       const skip = (page - 1) * limit;
 
+      const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { departmentId: true },
+      });
+
+      const userDepartmentId = currentUser?.departmentId || null;
+      const requiresDepartmentScope =
+        userRole === "COURSE_COORDINATOR" ||
+        userRole === "MODULE_COORDINATOR" ||
+        userRole === "PROGRAM_COORDINATOR" ||
+        userRole === "HOD" ||
+        userRole === "DEAN" ||
+        userRole === "CONTROLLER_OF_EXAMINATION";
+
+      if (requiresDepartmentScope && !userDepartmentId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            "Assign your faculty account to a department to view patterns",
+        });
+      }
+
+      const roleScope: Prisma.QuestionPaperPatternWhereInput =
+        userRole === "COURSE_COORDINATOR"
+          ? {
+              course: {
+                courseCoordinatorId: userId,
+                departmentId: userDepartmentId || undefined,
+              },
+            }
+          : userRole === "MODULE_COORDINATOR"
+            ? {
+                course: {
+                  moduleCoordinatorId: userId,
+                  departmentId: userDepartmentId || undefined,
+                },
+              }
+            : userRole === "PROGRAM_COORDINATOR"
+              ? {
+                  course: {
+                    programCoordinatorId: userId,
+                    departmentId: userDepartmentId || undefined,
+                  },
+                }
+              : userRole === "HOD"
+                ? {
+                    course: {
+                      departmentId: userDepartmentId || undefined,
+                      department: { hodId: userId },
+                    },
+                  }
+                : userRole === "DEAN"
+                  ? {
+                      course: {
+                        departmentId: userDepartmentId || undefined,
+                        department: { deanId: userId },
+                      },
+                    }
+                  : userRole === "CONTROLLER_OF_EXAMINATION"
+                    ? {
+                        course: {
+                          departmentId: userDepartmentId || undefined,
+                        },
+                      }
+                    : { id: "__no_access__" };
+
       const where: Prisma.QuestionPaperPatternWhereInput = {
+        ...roleScope,
         ...(courseId && { courseId }),
         ...(examType && { examType }),
         ...(semesterType && { semesterType }),
         ...(status && { status }),
       };
+
+      if (
+        (userRole === "HOD" ||
+          userRole === "DEAN" ||
+          userRole === "CONTROLLER_OF_EXAMINATION") &&
+        !status
+      ) {
+        where.status = {
+          in: ["APPROVED"],
+        };
+      }
+
+      if (
+        (userRole === "HOD" || userRole === "DEAN") &&
+        status &&
+        status !== "APPROVED"
+      ) {
+        return {
+          patterns: [],
+          total: 0,
+          page,
+          limit,
+          totalPages: 0,
+        };
+      }
 
       const [patterns, total] = await Promise.all([
         prisma.questionPaperPattern.findMany({
@@ -218,6 +488,13 @@ export const patternRouter = createTRPCRouter({
                 id: true,
                 name: true,
                 course_code: true,
+                department: {
+                  select: {
+                    id: true,
+                    name: true,
+                    code: true,
+                  },
+                },
               },
             },
           },
@@ -263,6 +540,7 @@ export const patternRouter = createTRPCRouter({
               id: true,
               name: true,
               course_code: true,
+              departmentId: true,
               courseCoordinator: {
                 select: {
                   id: true,
@@ -299,6 +577,84 @@ export const patternRouter = createTRPCRouter({
         });
       }
 
+      const userId = ctx.session.user.id;
+      const userRole = ctx.session.user.role;
+
+      const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { departmentId: true },
+      });
+
+      const userDepartmentId = currentUser?.departmentId || null;
+      const requiresDepartmentScope =
+        userRole === "COURSE_COORDINATOR" ||
+        userRole === "MODULE_COORDINATOR" ||
+        userRole === "PROGRAM_COORDINATOR" ||
+        userRole === "HOD" ||
+        userRole === "DEAN" ||
+        userRole === "CONTROLLER_OF_EXAMINATION";
+
+      if (requiresDepartmentScope && !userDepartmentId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            "Assign your faculty account to a department to access patterns",
+        });
+      }
+
+      const canAccess =
+        (userRole === "COURSE_COORDINATOR" &&
+          pattern.course.courseCoordinator.id === userId &&
+          pattern.course.departmentId === userDepartmentId) ||
+        (userRole === "MODULE_COORDINATOR" &&
+          pattern.course.moduleCoordinator.id === userId &&
+          pattern.course.departmentId === userDepartmentId) ||
+        (userRole === "PROGRAM_COORDINATOR" &&
+          pattern.course.programCoordinator.id === userId &&
+          pattern.course.departmentId === userDepartmentId) ||
+        (userRole === "CONTROLLER_OF_EXAMINATION" &&
+          pattern.course.departmentId === userDepartmentId);
+
+      if (!canAccess && (userRole === "HOD" || userRole === "DEAN")) {
+        if (pattern.status !== "APPROVED") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message:
+              "Pattern is not visible until coordinator approvals are complete",
+          });
+        }
+
+        const deptAccess = await prisma.course.findUnique({
+          where: { id: pattern.course.id },
+          select: {
+            departmentId: true,
+            department: {
+              select: {
+                hodId: true,
+                deanId: true,
+              },
+            },
+          },
+        });
+
+        if (
+          !deptAccess?.department ||
+          deptAccess.departmentId !== userDepartmentId ||
+          (userRole === "HOD" && deptAccess.department.hodId !== userId) ||
+          (userRole === "DEAN" && deptAccess.department.deanId !== userId)
+        ) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "You do not have access to this pattern",
+          });
+        }
+      } else if (!canAccess && userRole !== "HOD" && userRole !== "DEAN") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You do not have access to this pattern",
+        });
+      }
+
       // Calculate Part A and Part B totals from structure
       const partAStructure = pattern.partAStructure as Array<{
         marks: number;
@@ -311,8 +667,7 @@ export const patternRouter = createTRPCRouter({
 
       // Calculate Part A totals
       const partA_count = partAStructure.length;
-      const partA_marksEach =
-        partA_count > 0 ? partAStructure[0].marks : 0;
+      const partA_marksEach = partA_count > 0 ? partAStructure[0].marks : 0;
 
       // Calculate Part B totals
       let partB_count = 0;
@@ -351,12 +706,26 @@ export const patternRouter = createTRPCRouter({
     const userId = ctx.session.user.id;
     const userRole = ctx.session.user.role;
 
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { departmentId: true },
+    });
+
+    const userDepartmentId = currentUser?.departmentId || null;
+
+    if (!userDepartmentId) {
+      return { patterns: [] };
+    }
+
     let where: Prisma.QuestionPaperPatternWhereInput = {};
 
     if (userRole === "MODULE_COORDINATOR") {
       // Get patterns pending MC approval for courses where user is MC
       const courses = await prisma.course.findMany({
-        where: { moduleCoordinatorId: userId },
+        where: {
+          moduleCoordinatorId: userId,
+          departmentId: userDepartmentId,
+        },
         select: { id: true },
       });
       const courseIds = courses.map((c) => c.id);
@@ -368,7 +737,10 @@ export const patternRouter = createTRPCRouter({
     } else if (userRole === "PROGRAM_COORDINATOR") {
       // Get patterns pending PC approval for courses where user is PC
       const courses = await prisma.course.findMany({
-        where: { programCoordinatorId: userId },
+        where: {
+          programCoordinatorId: userId,
+          departmentId: userDepartmentId,
+        },
         select: { id: true },
       });
       const courseIds = courses.map((c) => c.id);
@@ -376,11 +748,6 @@ export const patternRouter = createTRPCRouter({
       where = {
         courseId: { in: courseIds },
         status: "PENDING_PC_APPROVAL",
-      };
-    } else if (userRole === "CONTROLLER_OF_EXAMINATION") {
-      // Get all patterns pending COE approval
-      where = {
-        status: "PENDING_COE_APPROVAL",
       };
     } else {
       return { patterns: [] };
@@ -413,7 +780,7 @@ export const patternRouter = createTRPCRouter({
   }),
 
   /**
-   * Approve a pattern (MC, PC, or COE)
+   * Approve a pattern (MC, PC)
    */
   approvePattern: coordinatorProcedure
     .input(approvePatternSchema)
@@ -428,11 +795,27 @@ export const patternRouter = createTRPCRouter({
       const userId = ctx.session.user.id;
       const userRole = ctx.session.user.role;
 
+      const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { departmentId: true },
+      });
+
+      const userDepartmentId = currentUser?.departmentId || null;
+
+      if (!userDepartmentId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            "Assign your faculty account to a department before approving patterns",
+        });
+      }
+
       const pattern = await prisma.questionPaperPattern.findUnique({
         where: { id: input.patternId },
         include: {
           course: {
             select: {
+              departmentId: true,
               moduleCoordinatorId: true,
               programCoordinatorId: true,
             },
@@ -449,6 +832,13 @@ export const patternRouter = createTRPCRouter({
 
       // Validate approval permissions
       if (userRole === "MODULE_COORDINATOR") {
+        if (pattern.course.departmentId !== userDepartmentId) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "You can only approve patterns in your department",
+          });
+        }
+
         if (pattern.status !== "PENDING_MC_APPROVAL") {
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -480,6 +870,13 @@ export const patternRouter = createTRPCRouter({
           pattern: updatedPattern,
         };
       } else if (userRole === "PROGRAM_COORDINATOR") {
+        if (pattern.course.departmentId !== userDepartmentId) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "You can only approve patterns in your department",
+          });
+        }
+
         if (pattern.status !== "PENDING_PC_APPROVAL") {
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -501,38 +898,13 @@ export const patternRouter = createTRPCRouter({
             pcApprovedAt: new Date(),
             pcApprovedById: userId,
             pcRemarks: input.remarks,
-            status: "PENDING_COE_APPROVAL",
-          },
-        });
-
-        return {
-          success: true,
-          message: "Pattern approved by Program Coordinator",
-          pattern: updatedPattern,
-        };
-      } else if (userRole === "CONTROLLER_OF_EXAMINATION") {
-        if (pattern.status !== "PENDING_COE_APPROVAL") {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Pattern is not pending COE approval",
-          });
-        }
-
-        // Final approval by COE
-        const updatedPattern = await prisma.questionPaperPattern.update({
-          where: { id: input.patternId },
-          data: {
-            coeApproved: true,
-            coeApprovedAt: new Date(),
-            coeApprovedById: userId,
-            coeRemarks: input.remarks,
             status: "APPROVED",
           },
         });
 
         return {
           success: true,
-          message: "Pattern approved by COE",
+          message: "Pattern approved by Program Coordinator",
           pattern: updatedPattern,
         };
       }
@@ -544,7 +916,7 @@ export const patternRouter = createTRPCRouter({
     }),
 
   /**
-   * Reject a pattern (MC, PC, or COE)
+   * Reject a pattern (MC, PC)
    */
   rejectPattern: coordinatorProcedure
     .input(rejectPatternSchema)
@@ -559,11 +931,27 @@ export const patternRouter = createTRPCRouter({
       const userId = ctx.session.user.id;
       const userRole = ctx.session.user.role;
 
+      const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { departmentId: true },
+      });
+
+      const userDepartmentId = currentUser?.departmentId || null;
+
+      if (!userDepartmentId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            "Assign your faculty account to a department before rejecting patterns",
+        });
+      }
+
       const pattern = await prisma.questionPaperPattern.findUnique({
         where: { id: input.patternId },
         include: {
           course: {
             select: {
+              departmentId: true,
               moduleCoordinatorId: true,
               programCoordinatorId: true,
             },
@@ -581,13 +969,13 @@ export const patternRouter = createTRPCRouter({
       // Validate rejection permissions
       if (
         (userRole === "MODULE_COORDINATOR" &&
+          pattern.course.departmentId === userDepartmentId &&
           pattern.status === "PENDING_MC_APPROVAL" &&
           pattern.course.moduleCoordinatorId === userId) ||
         (userRole === "PROGRAM_COORDINATOR" &&
+          pattern.course.departmentId === userDepartmentId &&
           pattern.status === "PENDING_PC_APPROVAL" &&
-          pattern.course.programCoordinatorId === userId) ||
-        (userRole === "CONTROLLER_OF_EXAMINATION" &&
-          pattern.status === "PENDING_COE_APPROVAL")
+          pattern.course.programCoordinatorId === userId)
       ) {
         // Store rejection remarks based on role
         const updateData: Prisma.QuestionPaperPatternUpdateInput = {
@@ -598,8 +986,6 @@ export const patternRouter = createTRPCRouter({
           updateData.mcRemarks = input.remarks;
         } else if (userRole === "PROGRAM_COORDINATOR") {
           updateData.pcRemarks = input.remarks;
-        } else if (userRole === "CONTROLLER_OF_EXAMINATION") {
-          updateData.coeRemarks = input.remarks;
         }
 
         const updatedPattern = await prisma.questionPaperPattern.update({
@@ -621,9 +1007,9 @@ export const patternRouter = createTRPCRouter({
     }),
 
   /**
-   * Delete a pattern (Course Coordinator only, DRAFT status only)
+   * Delete a pattern (allowed for all scoped roles)
    */
-  deletePattern: courseCoordinatorProcedure
+  deletePattern: coordinatorProcedure
     .input(deletePatternSchema)
     .mutation(async ({ ctx, input }) => {
       if (!ctx.session) {
@@ -634,13 +1020,23 @@ export const patternRouter = createTRPCRouter({
       }
 
       const userId = ctx.session.user.id;
+      const userRole = ctx.session.user.role;
 
       const pattern = await prisma.questionPaperPattern.findUnique({
         where: { id: input.id },
         include: {
           course: {
             select: {
+              departmentId: true,
               courseCoordinatorId: true,
+              moduleCoordinatorId: true,
+              programCoordinatorId: true,
+              department: {
+                select: {
+                  hodId: true,
+                  deanId: true,
+                },
+              },
             },
           },
         },
@@ -653,19 +1049,45 @@ export const patternRouter = createTRPCRouter({
         });
       }
 
-      // Verify ownership
-      if (pattern.course.courseCoordinatorId !== userId) {
+      if (!canManagePatternForRole(userRole, userId, pattern.course)) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You are not the coordinator for this course",
+          message: "You do not have permission to delete this pattern",
         });
       }
 
-      // Can only delete DRAFT patterns
-      if (pattern.status !== "DRAFT") {
+      if (
+        userRole === "COURSE_COORDINATOR" ||
+        userRole === "MODULE_COORDINATOR" ||
+        userRole === "PROGRAM_COORDINATOR" ||
+        userRole === "HOD" ||
+        userRole === "DEAN"
+      ) {
+        const currentUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { departmentId: true },
+        });
+
+        if (
+          !currentUser?.departmentId ||
+          currentUser.departmentId !== pattern.course.departmentId
+        ) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "You can only manage patterns within your department",
+          });
+        }
+      }
+
+      const generatedPaperCount = await prisma.questionPaper.count({
+        where: { patternId: input.id },
+      });
+
+      if (generatedPaperCount > 0) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Can only delete patterns in DRAFT status",
+          message:
+            "Cannot delete this pattern because papers are already generated from it",
         });
       }
 
@@ -683,7 +1105,7 @@ export const patternRouter = createTRPCRouter({
    * Get approved patterns (for COE to generate papers)
    * Returns simplified list without pagination for easier frontend use
    */
-  getApprovedPatterns: controllerOfExamination
+  getApprovedPatterns: paperCommitteeProcedure
     .input(
       z
         .object({
@@ -691,7 +1113,7 @@ export const patternRouter = createTRPCRouter({
           examType: z.enum(examTypeArray).optional(),
           semesterType: z.enum(semesterTypeArray).optional(),
         })
-        .optional()
+        .optional(),
     )
     .query(async ({ ctx, input }) => {
       if (!ctx.session) {
@@ -701,12 +1123,68 @@ export const patternRouter = createTRPCRouter({
         });
       }
 
+      const userId = ctx.session.user.id;
+      const userRole = ctx.session.user.role;
+
+      const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { departmentId: true },
+      });
+
+      const userDepartmentId = currentUser?.departmentId || null;
+
       const where: Prisma.QuestionPaperPatternWhereInput = {
-        status: "APPROVED",
+        status: { in: ["APPROVED"] },
         ...(input?.courseId && { courseId: input.courseId }),
         ...(input?.examType && { examType: input.examType }),
         ...(input?.semesterType && { semesterType: input.semesterType }),
       };
+
+      if (userRole === "HOD") {
+        if (!userDepartmentId) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message:
+              "Assign your faculty account to a department to view approved patterns",
+          });
+        }
+        where.course = {
+          departmentId: userDepartmentId,
+          department: {
+            hodId: userId,
+          },
+        };
+      }
+
+      if (userRole === "DEAN") {
+        if (!userDepartmentId) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message:
+              "Assign your faculty account to a department to view approved patterns",
+          });
+        }
+        where.course = {
+          departmentId: userDepartmentId,
+          department: {
+            deanId: userId,
+          },
+        };
+      }
+
+      if (userRole === "CONTROLLER_OF_EXAMINATION") {
+        if (!userDepartmentId) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message:
+              "Assign your faculty account to a department to view approved patterns",
+          });
+        }
+
+        where.course = {
+          departmentId: userDepartmentId,
+        };
+      }
 
       const patterns = await prisma.questionPaperPattern.findMany({
         where,
@@ -737,8 +1215,7 @@ export const patternRouter = createTRPCRouter({
 
         // Calculate Part A totals
         const partA_count = partAStructure.length;
-        const partA_marksEach =
-          partA_count > 0 ? partAStructure[0].marks : 0;
+        const partA_marksEach = partA_count > 0 ? partAStructure[0].marks : 0;
 
         // Calculate Part B totals
         let partB_count = 0;

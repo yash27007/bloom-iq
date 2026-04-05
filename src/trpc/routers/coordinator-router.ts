@@ -3,8 +3,8 @@ import { coordinatorProcedure, createTRPCRouter } from "../init";
 import * as z from "zod";
 import { TRPCError } from "@trpc/server";
 import { generateQuestionsWithAI } from "@/lib/ai-question-generator";
-import { parsePDFToText } from "@/lib/pdf-parser";
 import { logger } from "@/lib/logger";
+import type { Prisma } from "@/generated/prisma/client";
 import {
   AIProviderType,
   generateAIText,
@@ -82,7 +82,7 @@ function sanitizeChatResponse(response: string): string {
         {
           englishRatio,
           length: cleaned.length,
-        }
+        },
       );
       cleaned =
         "I'm Kai, and I apologize, but I'm having trouble understanding that. Could you please rephrase your question in English?";
@@ -106,7 +106,7 @@ function sanitizeChatResponse(response: string): string {
 async function generateChatResponse(
   prompt: string,
   model?: string,
-  provider?: AIProviderType
+  provider?: AIProviderType,
 ): Promise<string> {
   return generateAIText(prompt, {
     model,
@@ -124,7 +124,7 @@ async function generateChatResponse(
 async function decideFunctionCall(
   message: string,
   model?: string,
-  provider?: AIProviderType
+  provider?: AIProviderType,
 ): Promise<FunctionCall> {
   const decisionPrompt = `You are a decision-making assistant. Analyze the user's message and decide if you need to search course material.
 
@@ -178,7 +178,7 @@ Respond with ONLY this JSON format (no other text):
         "Failed to parse function call, using fallback",
         {
           response: responseText.substring(0, 200),
-        }
+        },
       );
       // Fallback: use simple heuristic
       const normalizedMessage = message.toLowerCase().trim();
@@ -194,7 +194,7 @@ Respond with ONLY this JSON format (no other text):
         "bye",
       ];
       const isGreeting = simpleGreetings.some((g) =>
-        normalizedMessage.includes(g)
+        normalizedMessage.includes(g),
       );
       functionCall = {
         name: isGreeting ? "none" : "search_material",
@@ -214,13 +214,13 @@ Respond with ONLY this JSON format (no other text):
       "CoordinatorRouter",
       "Function calling error, using fallback",
       undefined,
-      error instanceof Error ? error : new Error(String(error))
+      error instanceof Error ? error : new Error(String(error)),
     );
     // Fallback: assume we need to search for most queries
     const normalizedMessage = message.toLowerCase().trim();
     const simpleGreetings = ["hi", "hello", "hey", "who are you"];
     const isGreeting = simpleGreetings.some(
-      (g) => normalizedMessage === g || normalizedMessage.startsWith(g + " ")
+      (g) => normalizedMessage === g || normalizedMessage.startsWith(g + " "),
     );
     return {
       name: isGreeting ? "none" : "search_material",
@@ -285,7 +285,7 @@ async function ensureChatHistoryTable() {
         undefined,
         createError instanceof Error
           ? createError
-          : new Error(String(createError))
+          : new Error(String(createError)),
       );
       return false;
     }
@@ -295,38 +295,42 @@ async function ensureChatHistoryTable() {
 export const coordinatorRouter = createTRPCRouter({
   // Get available AI models (supports both Ollama and Gemini)
   getOllamaModels: coordinatorProcedure
-    .input(z.object({ provider: z.enum(["GEMINI", "OLLAMA"]).optional() }).optional())
+    .input(
+      z
+        .object({ provider: z.enum(["GEMINI", "OLLAMA"]).optional() })
+        .optional(),
+    )
     .query(async ({ input }) => {
-    try {
-      const providerType =
-        (input?.provider as AIProviderType) ||
-        (process.env.AI_PROVIDER as AIProviderType) ||
-        AIProviderType.OLLAMA;
-      const models = await listAvailableModels(providerType);
+      try {
+        const providerType =
+          (input?.provider as AIProviderType) ||
+          (process.env.AI_PROVIDER as AIProviderType) ||
+          AIProviderType.OLLAMA;
+        const models = await listAvailableModels(providerType);
 
-      logger.debug(
-        "CoordinatorRouter",
-        `Returning ${models.length} models for ${providerType}`
-      );
+        logger.debug(
+          "CoordinatorRouter",
+          `Returning ${models.length} models for ${providerType}`,
+        );
 
-      return models.map((model) => ({ name: model, model }));
-    } catch (error) {
-      logger.error(
-        "CoordinatorRouter",
-        "Error fetching AI models",
-        error instanceof Error ? error : new Error(String(error))
-      );
-      // Return default model on error based on provider
-      const providerType =
-        (input?.provider as AIProviderType) ||
-        (process.env.AI_PROVIDER as AIProviderType) ||
-        AIProviderType.OLLAMA;
-      if (providerType === AIProviderType.GEMINI) {
-        return [{ name: "gemini-2.5-flash", model: "gemini-2.5-flash" }];
+        return models.map((model) => ({ name: model, model }));
+      } catch (error) {
+        logger.error(
+          "CoordinatorRouter",
+          "Error fetching AI models",
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        // Return default model on error based on provider
+        const providerType =
+          (input?.provider as AIProviderType) ||
+          (process.env.AI_PROVIDER as AIProviderType) ||
+          AIProviderType.OLLAMA;
+        if (providerType === AIProviderType.GEMINI) {
+          return [{ name: "gemini-2.5-flash", model: "gemini-2.5-flash" }];
+        }
+        return [{ name: "mistral:7b", model: "mistral:7b" }];
       }
-      return [{ name: "mistral:7b", model: "mistral:7b" }];
-    }
-  }),
+    }),
 
   // Get coordinator details only
   getCoordinatorProfile: coordinatorProcedure
@@ -536,15 +540,37 @@ export const coordinatorRouter = createTRPCRouter({
         });
       }
 
+      const userRole = ctx.session?.user?.role;
+
+      const where: Prisma.CourseWhereInput =
+        userRole === "COURSE_COORDINATOR"
+          ? { courseCoordinatorId: userId }
+          : userRole === "MODULE_COORDINATOR"
+            ? { moduleCoordinatorId: userId }
+            : userRole === "PROGRAM_COORDINATOR"
+              ? { programCoordinatorId: userId }
+              : userRole === "HOD"
+                ? { department: { hodId: userId } }
+                : userRole === "DEAN"
+                  ? { department: { deanId: userId } }
+                  : userRole === "CONTROLLER_OF_EXAMINATION"
+                    ? {}
+                    : { id: "__no_access__" };
+
       const courses = await prisma.course.findMany({
-        where: {
-          courseCoordinatorId: userId,
-        },
+        where,
         select: {
           id: true,
           course_code: true,
           name: true,
           description: true,
+          department: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+            },
+          },
         },
         orderBy: {
           name: "asc",
@@ -578,7 +604,7 @@ export const coordinatorRouter = createTRPCRouter({
             info: z.record(z.string(), z.unknown()).optional(),
           }),
         }),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       try {
@@ -642,7 +668,7 @@ export const coordinatorRouter = createTRPCRouter({
             title: input.title,
             pages: input.parsedContent.metadata.pages,
             contentLength: input.parsedContent.markdown.length,
-          }
+          },
         );
 
         // Trigger background embedding (content already parsed)
@@ -654,7 +680,7 @@ export const coordinatorRouter = createTRPCRouter({
             await MaterialService.embedMaterialInBackground(
               courseMaterial.id,
               input.parsedContent.markdown,
-              input.materialType === "UNIT_PDF" ? input.unit : 0
+              input.materialType === "UNIT_PDF" ? input.unit : 0,
             );
           } catch (error) {
             logger.error(
@@ -663,7 +689,7 @@ export const coordinatorRouter = createTRPCRouter({
               error instanceof Error ? error : new Error(String(error)),
               {
                 materialId: courseMaterial.id,
-              }
+              },
             );
           }
         }, 0);
@@ -752,11 +778,11 @@ export const coordinatorRouter = createTRPCRouter({
           material.embeddingStatus === "PROCESSING" && estimatedTotalChunks > 0
             ? Math.min(
                 100,
-                Math.round((currentChunkCount / estimatedTotalChunks) * 100)
+                Math.round((currentChunkCount / estimatedTotalChunks) * 100),
               )
             : material.embeddingStatus === "COMPLETED"
-            ? 100
-            : 0;
+              ? 100
+              : 0;
 
         // Log progress for processing materials
         if (
@@ -805,7 +831,7 @@ export const coordinatorRouter = createTRPCRouter({
     .input(
       z.object({
         materialId: z.string(),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       try {
@@ -841,14 +867,13 @@ export const coordinatorRouter = createTRPCRouter({
           {
             materialId: input.materialId,
             userId,
-          }
+          },
         );
 
         // 1. Delete chunks/embeddings from PostgreSQL via VectorDBService
         try {
-          const { VectorDBService } = await import(
-            "@/services/vector-db.service"
-          );
+          const { VectorDBService } =
+            await import("@/services/vector-db.service");
           const vectorDB = new VectorDBService();
           await vectorDB.deleteMaterialChunks(input.materialId);
           logger.info(
@@ -856,20 +881,16 @@ export const coordinatorRouter = createTRPCRouter({
             `Deleted vector chunks for material ${input.materialId}`,
             {
               materialId: input.materialId,
-            }
+            },
           );
         } catch (vectorError) {
-          logger.warn(
-            "CoordinatorRouter",
-            `Error deleting vector chunks`,
-            {
-              materialId: input.materialId,
-              error:
-                vectorError instanceof Error
-                  ? vectorError.message
-                  : String(vectorError),
-            }
-          );
+          logger.warn("CoordinatorRouter", `Error deleting vector chunks`, {
+            materialId: input.materialId,
+            error:
+              vectorError instanceof Error
+                ? vectorError.message
+                : String(vectorError),
+          });
         }
 
         // 2. Delete chunks from PostgreSQL (safety - cascade should handle it)
@@ -882,7 +903,7 @@ export const coordinatorRouter = createTRPCRouter({
           {
             materialId: input.materialId,
             chunkCount: deletedChunks.count,
-          }
+          },
         );
 
         // 3. Delete related questions
@@ -897,7 +918,7 @@ export const coordinatorRouter = createTRPCRouter({
           {
             materialId: input.materialId,
             questionCount: deletedQuestions.count,
-          }
+          },
         );
 
         // 4. Delete related question generation jobs
@@ -912,7 +933,7 @@ export const coordinatorRouter = createTRPCRouter({
           {
             materialId: input.materialId,
             jobCount: deletedJobs.count,
-          }
+          },
         );
 
         // 5. Delete chat history
@@ -927,7 +948,7 @@ export const coordinatorRouter = createTRPCRouter({
           {
             materialId: input.materialId,
             chatCount: deletedChatHistory.count,
-          }
+          },
         );
 
         // 6. Delete the database record (this will cascade delete any remaining related data)
@@ -946,7 +967,7 @@ export const coordinatorRouter = createTRPCRouter({
             deletedQuestions: deletedQuestions.count,
             deletedJobs: deletedJobs.count,
             deletedChatHistory: deletedChatHistory.count,
-          }
+          },
         );
 
         return {
@@ -965,7 +986,7 @@ export const coordinatorRouter = createTRPCRouter({
           {
             materialId: input.materialId,
             userId: ctx.session?.user?.id,
-          }
+          },
         );
         if (error instanceof TRPCError) {
           throw error;
@@ -1003,7 +1024,11 @@ export const coordinatorRouter = createTRPCRouter({
           scenarioBased: z.number().min(0).max(50),
           problemBased: z.number().min(0).max(50),
         }),
-      })
+        // Enhanced generation options
+        academicLevel: z.enum(["UG", "PG", "PHD"]).default("UG"),
+        enableWebSearch: z.boolean().default(false),
+        enableRichMedia: z.boolean().default(true),
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       try {
@@ -1060,14 +1085,16 @@ export const coordinatorRouter = createTRPCRouter({
           });
         }
 
-        const materialContent = chunks.map((chunk) => chunk.content).join("\n\n");
+        const materialContent = chunks
+          .map((chunk) => chunk.content)
+          .join("\n\n");
 
         console.log(`[Question Generation] Material ID: ${material.id}`);
         console.log(`[Question Generation] Material Title: ${material.title}`);
         console.log(`[Question Generation] Unit: ${material.unit}`);
         console.log(`[Question Generation] Chunks: ${chunks.length}`);
         console.log(
-          `[Question Generation] Combined Content Length: ${materialContent.length} characters`
+          `[Question Generation] Combined Content Length: ${materialContent.length} characters`,
         );
 
         // Create question generation job
@@ -1080,7 +1107,7 @@ export const coordinatorRouter = createTRPCRouter({
             status: "PROCESSING",
             totalQuestions: Object.values(input.questionCounts).reduce(
               (sum, count) => sum + count,
-              0
+              0,
             ),
           },
         });
@@ -1088,7 +1115,7 @@ export const coordinatorRouter = createTRPCRouter({
         // Generate questions using AI service
         const totalQuestions = Object.values(input.questionCounts).reduce(
           (sum, count) => sum + count,
-          0
+          0,
         );
 
         if (totalQuestions > 0) {
@@ -1103,9 +1130,12 @@ export const coordinatorRouter = createTRPCRouter({
                 questionCounts: input.questionCounts,
                 bloomLevels: input.bloomLevels,
                 questionTypes: input.questionTypes,
+                academicLevel: input.academicLevel,
+                enableWebSearch: input.enableWebSearch,
+                enableRichMedia: input.enableRichMedia,
               },
               input.model,
-              input.provider
+              input.provider,
             );
 
             // Update job status
@@ -1145,7 +1175,7 @@ export const coordinatorRouter = createTRPCRouter({
                       original: q.difficulty_level,
                       derived: difficultyLevel,
                       marks: q.marks,
-                    }
+                    },
                   );
                 }
 
@@ -1180,6 +1210,13 @@ export const coordinatorRouter = createTRPCRouter({
                     | "SCENARIO_BASED"
                     | "PROBLEM_BASED",
                   marks: marks as "TWO" | "EIGHT" | "SIXTEEN",
+                  // Enhanced fields
+                  academicLevel: q.academic_level || input.academicLevel,
+                  renderingType: q.rendering_type || "TEXT",
+                  latexContent: q.latex_content || null,
+                  mermaidContent: q.mermaid_content || null,
+                  realWorldContext: q.real_world_context || null,
+                  bloomJustification: q.bloom_justification || null,
                 };
               }),
               courseId: material.courseId,
@@ -1244,7 +1281,7 @@ export const coordinatorRouter = createTRPCRouter({
             "REJECTED",
           ])
           .optional(),
-      })
+      }),
     )
     .query(async ({ input, ctx }) => {
       try {
@@ -1273,7 +1310,7 @@ export const coordinatorRouter = createTRPCRouter({
         if (whereConditions.courseId) {
           // Check if user has access to this specific course
           const hasAccess = userCourses.some(
-            (course) => course.id === whereConditions.courseId
+            (course) => course.id === whereConditions.courseId,
           );
           if (!hasAccess) {
             throw new TRPCError({
@@ -1348,7 +1385,7 @@ export const coordinatorRouter = createTRPCRouter({
           .enum(["DIRECT", "INDIRECT", "SCENARIO_BASED", "PROBLEM_BASED"])
           .optional(),
         marks: z.enum(["TWO", "EIGHT", "SIXTEEN"]).optional(),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       try {
@@ -1402,7 +1439,7 @@ export const coordinatorRouter = createTRPCRouter({
     .input(
       z.object({
         questionIds: z.array(z.string()),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       try {
@@ -1417,7 +1454,7 @@ export const coordinatorRouter = createTRPCRouter({
         });
 
         const invalidQuestions = questions.filter(
-          (q) => q.course.courseCoordinatorId !== ctx.session?.user?.id
+          (q) => q.course.courseCoordinatorId !== ctx.session?.user?.id,
         );
 
         if (invalidQuestions.length > 0) {
@@ -1461,7 +1498,7 @@ export const coordinatorRouter = createTRPCRouter({
     .input(
       z.object({
         questionId: z.string(),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       try {
@@ -1558,7 +1595,7 @@ export const coordinatorRouter = createTRPCRouter({
                   "ANALYZE",
                   "EVALUATE",
                   "CREATE",
-                ])
+                ]),
               ),
             generationType: z
               .union([
@@ -1580,7 +1617,7 @@ export const coordinatorRouter = createTRPCRouter({
                   "INDIRECT",
                   "SCENARIO_BASED",
                   "PROBLEM_BASED",
-                ])
+                ]),
               ),
             marks: z
               .union([z.string(), z.enum(["TWO", "EIGHT", "SIXTEEN"])])
@@ -1589,9 +1626,9 @@ export const coordinatorRouter = createTRPCRouter({
                 return str.toUpperCase() || "TWO";
               })
               .pipe(z.enum(["TWO", "EIGHT", "SIXTEEN"])),
-          })
+          }),
         ),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       try {
@@ -1744,17 +1781,15 @@ export const coordinatorRouter = createTRPCRouter({
           {
             materialId: input.materialId,
             userId,
-          }
+          },
         );
 
         // Trigger embedding by calling the service method
         // We'll need to make embedMaterialInBackground public or create a wrapper
-        const { EmbeddingService } = await import(
-          "@/services/embedding.service"
-        );
-        const { VectorDBService } = await import(
-          "@/services/vector-db.service"
-        );
+        const { EmbeddingService } =
+          await import("@/services/embedding.service");
+        const { VectorDBService } =
+          await import("@/services/vector-db.service");
 
         // Update status to PROCESSING
         await prisma.course_Material.update({
@@ -1773,7 +1808,7 @@ export const coordinatorRouter = createTRPCRouter({
             onProgress: (current, total) => {
               logger.logEmbeddingProgress(input.materialId, current, total);
             },
-          }
+          },
         );
 
         // Store chunks
@@ -1830,7 +1865,7 @@ export const coordinatorRouter = createTRPCRouter({
           error instanceof Error ? error : new Error(String(error)),
           {
             materialId: input.materialId,
-          }
+          },
         );
 
         // Update status to FAILED
@@ -1865,7 +1900,7 @@ export const coordinatorRouter = createTRPCRouter({
         message: z.string().min(1),
         provider: z.enum(["GEMINI", "OLLAMA"]).optional(),
         model: z.string().optional(),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       try {
@@ -1924,7 +1959,7 @@ export const coordinatorRouter = createTRPCRouter({
         const functionCall = await decideFunctionCall(
           input.message,
           input.model,
-          input.provider as AIProviderType | undefined
+          input.provider as AIProviderType | undefined,
         );
         const useRAG = functionCall.name === "search_material";
 
@@ -1940,12 +1975,10 @@ export const coordinatorRouter = createTRPCRouter({
         // Only fetch embeddings and search if the model decided to use search_material
         if (useRAG) {
           // Get relevant chunks using semantic search in PostgreSQL
-          const { VectorDBService } = await import(
-            "@/services/vector-db.service"
-          );
-          const { EmbeddingService } = await import(
-            "@/services/embedding.service"
-          );
+          const { VectorDBService } =
+            await import("@/services/vector-db.service");
+          const { EmbeddingService } =
+            await import("@/services/embedding.service");
 
           try {
             const vectorDB = new VectorDBService();
@@ -1953,14 +1986,14 @@ export const coordinatorRouter = createTRPCRouter({
 
             // Generate embedding for the query
             const queryEmbedding = await embeddingService.generateEmbedding(
-              input.message
+              input.message,
             );
 
             // Search for relevant chunks using cosine similarity
             const chunks = await vectorDB.searchChunks(
               queryEmbedding.embedding,
               { materialId: input.materialId, unit: material.unit || 0 },
-              5 // Top 5 most relevant chunks
+              5, // Top 5 most relevant chunks
             );
 
             if (chunks.length > 0) {
@@ -1972,7 +2005,7 @@ export const coordinatorRouter = createTRPCRouter({
                   chunkCount: chunks.length,
                   materialId: input.materialId,
                   unit: material.unit,
-                }
+                },
               );
             } else {
               // Fallback to sequential chunks if no semantic results
@@ -1985,9 +2018,13 @@ export const coordinatorRouter = createTRPCRouter({
                 orderBy: { chunkIndex: "asc" },
               });
               relevantChunks = dbChunks.map((c) => c.content);
-              logger.debug("CoordinatorRouter", "Using sequential chunks fallback", {
-                chunkCount: dbChunks.length,
-              });
+              logger.debug(
+                "CoordinatorRouter",
+                "Using sequential chunks fallback",
+                {
+                  chunkCount: dbChunks.length,
+                },
+              );
             }
           } catch (vectorError) {
             logger.warn(
@@ -1999,7 +2036,7 @@ export const coordinatorRouter = createTRPCRouter({
                   vectorError instanceof Error
                     ? vectorError.message
                     : String(vectorError),
-              }
+              },
             );
             // Fallback: use sequential chunks
             const dbChunks = await prisma.material_Chunk.findMany({
@@ -2052,7 +2089,7 @@ export const coordinatorRouter = createTRPCRouter({
             {
               materialId: input.materialId,
               unit: material.unit,
-            }
+            },
           );
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -2140,10 +2177,11 @@ Respond naturally:
           answer = await generateChatResponse(
             prompt,
             model,
-            input.provider as AIProviderType | undefined
+            input.provider as AIProviderType | undefined,
           );
           if (!answer) {
-            answer = "I'm Kai, and I couldn't generate a response. Please try again.";
+            answer =
+              "I'm Kai, and I couldn't generate a response. Please try again.";
           }
         } catch (error) {
           logger.error(
@@ -2153,7 +2191,7 @@ Respond naturally:
             {
               provider: providerType,
               model,
-            }
+            },
           );
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
@@ -2187,7 +2225,7 @@ Respond naturally:
           "CoordinatorRouter",
           "Chat error",
           error instanceof Error ? error : new Error(String(error)),
-          { materialId: input.materialId }
+          { materialId: input.materialId },
         );
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -2204,7 +2242,7 @@ Respond naturally:
     .input(
       z.object({
         materialId: z.string(),
-      })
+      }),
     )
     .query(async ({ input, ctx }) => {
       try {
@@ -2259,7 +2297,7 @@ Respond naturally:
           "CoordinatorRouter",
           "Failed to fetch chat history",
           error instanceof Error ? error : new Error(String(error)),
-          { materialId: input.materialId }
+          { materialId: input.materialId },
         );
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -2276,7 +2314,7 @@ Respond naturally:
     .input(
       z.object({
         materialId: z.string(),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       try {
@@ -2313,7 +2351,7 @@ Respond naturally:
           "CoordinatorRouter",
           "Failed to clear chat history",
           error instanceof Error ? error : new Error(String(error)),
-          { materialId: input.materialId }
+          { materialId: input.materialId },
         );
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -2389,11 +2427,12 @@ Respond naturally:
         courseId: z.string(),
         questionPaperContent: z.string(), // Pre-parsed text content
         provider: z.enum(["GEMINI", "OLLAMA"]).optional(),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       try {
         const userId = ctx.session?.user?.id;
+        const userRole = ctx.session?.user?.role;
         if (!userId) {
           throw new TRPCError({
             code: "UNAUTHORIZED",
@@ -2401,15 +2440,18 @@ Respond naturally:
           });
         }
 
+        if (userRole !== "COURSE_COORDINATOR") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Only course coordinators can validate question papers",
+          });
+        }
+
         // Verify the user has access to this course
         const course = await prisma.course.findFirst({
           where: {
             id: input.courseId,
-            OR: [
-              { courseCoordinatorId: userId },
-              { moduleCoordinatorId: userId },
-              { programCoordinatorId: userId },
-            ],
+            courseCoordinatorId: userId,
           },
         });
 
@@ -2421,15 +2463,14 @@ Respond naturally:
         }
 
         // Import validation service
-        const {
-          validateQuestionPaper,
-        } = await import("@/services/question-paper-validation.service");
+        const { validateQuestionPaper } =
+          await import("@/services/question-paper-validation.service");
 
         // Validate the question paper with pre-parsed content
         const result = await validateQuestionPaper(
           input.courseId,
           input.questionPaperContent,
-          input.provider
+          input.provider,
         );
 
         return result;
@@ -2441,7 +2482,7 @@ Respond naturally:
           "CoordinatorRouter",
           "Failed to validate question paper",
           error instanceof Error ? error : new Error(String(error)),
-          { courseId: input.courseId }
+          { courseId: input.courseId },
         );
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",

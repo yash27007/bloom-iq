@@ -17,6 +17,14 @@ export default async function CoordinatorDashboardPage() {
         redirect("/sign-in");
     }
 
+    if (session.user.role === "HOD") {
+        redirect("/coordinator/dashboard/hod");
+    }
+
+    if (session.user.role === "DEAN") {
+        redirect("/coordinator/dashboard/dean");
+    }
+
     // Fetch coordinator profile and course data
     let coordinatorProfile = null;
     let courseData = null;

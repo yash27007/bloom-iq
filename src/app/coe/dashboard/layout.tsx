@@ -16,8 +16,11 @@ export default async function CoeDashboardLayout({
         redirect("/sign-in");
     }
 
-    // Check if user has COE role
-    if (session.user.role !== "CONTROLLER_OF_EXAMINATION") {
+    if (
+        session.user.role !== "CONTROLLER_OF_EXAMINATION" &&
+        session.user.role !== "HOD" &&
+        session.user.role !== "DEAN"
+    ) {
         redirect("/unauthorized");
     }
 
@@ -25,7 +28,7 @@ export default async function CoeDashboardLayout({
         <SidebarProvider>
             <div className="flex min-h-screen w-full">
                 <CoeDashboardSidebar user={session.user} />
-                <main className="flex-1 overflow-y-auto">
+                <main className="flex-1 overflow-x-hidden overflow-y-auto">
                     {children}
                 </main>
             </div>

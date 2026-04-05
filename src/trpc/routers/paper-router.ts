@@ -1,19 +1,142 @@
 import { prisma } from "@/lib/prisma";
-import { coordinatorProcedure, createTRPCRouter } from "../init";
+import { createTRPCRouter, paperCommitteeProcedure } from "../init";
 import * as z from "zod";
 import { TRPCError } from "@trpc/server";
+import { generateAIText } from "@/services/ai";
+
+const HEADER_META_PREFIX = "[[BLOOMIQ_HEADER_META]]";
+
+function decodeInstructionsWithMeta(raw?: string | null) {
+  if (!raw) {
+    return {
+      degreeYearSem: "",
+      dateSession: "",
+      instructions: "",
+    };
+  }
+
+  if (!raw.startsWith(HEADER_META_PREFIX)) {
+    return {
+      degreeYearSem: "",
+      dateSession: "",
+      instructions: raw,
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(raw.slice(HEADER_META_PREFIX.length)) as {
+      degreeYearSem?: string;
+      dateSession?: string;
+      instructions?: string;
+    };
+
+    return {
+      degreeYearSem: parsed.degreeYearSem || "",
+      dateSession: parsed.dateSession || "",
+      instructions: parsed.instructions || "",
+    };
+  } catch {
+    return {
+      degreeYearSem: "",
+      dateSession: "",
+      instructions: raw,
+    };
+  }
+}
 
 /**
  * Paper Generation Service
  * Selects questions from approved question bank based on pattern
  */
+type SelectedQuestion = {
+  id: string;
+  question: string;
+  answer: string;
+  marks: "TWO" | "EIGHT" | "SIXTEEN";
+  bloomLevel: string;
+  unit: number | null;
+  isFallback?: boolean;
+};
+
+const ENABLE_DEMO_FALLBACK_QUESTIONS =
+  process.env.NODE_ENV !== "production" ||
+  process.env.ENABLE_DEMO_FALLBACK_QUESTIONS === "true";
+
+function marksNumberToEnum(marks: number): "TWO" | "EIGHT" | "SIXTEEN" {
+  if (marks === 2) return "TWO";
+  if (marks === 8) return "EIGHT";
+  return "SIXTEEN";
+}
+
+function readPrimaryUnit(units: unknown): number | null {
+  if (!Array.isArray(units) || units.length === 0) return null;
+  const first = Number(units[0]);
+  return Number.isFinite(first) ? first : null;
+}
+
+function fallbackId(section: "A" | "B", slotLabel: string) {
+  return `fallback-${section}-${slotLabel}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createDemoFallbackQuestion(params: {
+  section: "A" | "B";
+  slotLabel: string;
+  marks: number;
+  bloomLevel?: string;
+  unit?: number | null;
+}): SelectedQuestion {
+  const marksEnum = marksNumberToEnum(params.marks);
+  const unitText = params.unit ? `Unit ${params.unit}` : "the mapped unit";
+  const bloom = (params.bloomLevel || "APPLY").toUpperCase();
+
+  return {
+    id: fallbackId(params.section, params.slotLabel),
+    question: `[DEMO FALLBACK] ${params.section}${params.slotLabel}: Create a ${bloom} level question from ${unitText}.`,
+    answer:
+      "[DEMO FALLBACK ANSWER] This placeholder answer is auto-generated for demo when approved question bank coverage is insufficient.",
+    marks: marksEnum,
+    bloomLevel: bloom,
+    unit: params.unit ?? null,
+    isFallback: true,
+  };
+}
+
+function fallbackOrThrow(params: {
+  section: "A" | "B";
+  slotLabel: string;
+  marks: number;
+  bloomLevel?: string;
+  unit?: number | null;
+}) {
+  if (ENABLE_DEMO_FALLBACK_QUESTIONS) {
+    return createDemoFallbackQuestion(params);
+  }
+
+  throw new TRPCError({
+    code: "BAD_REQUEST",
+    message:
+      "Not enough approved questions to fill this paper pattern. Enable demo fallback questions for non-production demos.",
+  });
+}
+
+function pickFromPool(
+  poolByMarks: Record<"TWO" | "EIGHT" | "SIXTEEN", SelectedQuestion[]>,
+  marksEnum: "TWO" | "EIGHT" | "SIXTEEN",
+) {
+  const pool = poolByMarks[marksEnum];
+  if (!pool || pool.length === 0) return undefined;
+  const idx = Math.floor(Math.random() * pool.length);
+  const [picked] = pool.splice(idx, 1);
+  return picked;
+}
+
 async function selectQuestionsForPaper(
   courseId: string,
   pattern: {
     partAStructure?: unknown;
     partBStructure?: unknown;
     totalMarks: number;
-  }
+  },
 ) {
   // Get all fully approved questions for the course
   const approvedQuestions = await prisma.question.findMany({
@@ -27,67 +150,127 @@ async function selectQuestionsForPaper(
     orderBy: { createdAt: "desc" },
   });
 
-  if (approvedQuestions.length === 0) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "No approved questions available for this course",
-    });
-  }
+  // Mark questions as selected by tracking usage across generated sets,
+  // then prevent duplicates in subsequent set generation.
+  const existingPapers = await prisma.questionPaper.findMany({
+    where: { courseId },
+    select: {
+      partA_questionIds: true,
+      partB_questionIds: true,
+    },
+  });
 
-  // Parse pattern structures
-  const partASlots = Array.isArray(pattern.partAStructure) ? pattern.partAStructure : [];
-  const partBGroups = Array.isArray(pattern.partBStructure) ? pattern.partBStructure : [];
-
-  // Count questions needed for Part A (typically 2 marks each)
-  const partACount = partASlots.length;
-  const partA_marksEach = partASlots[0]?.marks || 2;
-  const partA_marksEnum = partA_marksEach === 2 ? "TWO" : partA_marksEach === 8 ? "EIGHT" : "SIXTEEN";
-  
-  const partAQuestions = approvedQuestions.filter((q) => q.marks === partA_marksEnum);
-
-  if (partAQuestions.length < partACount) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: `Not enough ${partA_marksEach}-mark questions. Need ${partACount}, found ${partAQuestions.length}`,
-    });
-  }
-
-  // Randomly select Part A questions
-  const selectedPartA = partAQuestions
-    .sort(() => Math.random() - 0.5)
-    .slice(0, partACount);
-
-  // Count questions needed for Part B
-  // For OR patterns, we need questions for both options
-  let partBCount = 0;
-  let partB_marksEach = 16;
-  for (const group of partBGroups as any[]) {
-    if (group.hasOR && group.options) {
-      // Need questions for both options
-      partBCount += group.options.length;
-      partB_marksEach = group.options[0]?.questionSlot?.marks || 16;
-    } else if (group.questionSlot) {
-      partBCount += 1;
-      partB_marksEach = group.questionSlot.marks || 16;
-    }
-  }
-
-  const partB_marksEnum = partB_marksEach === 2 ? "TWO" : partB_marksEach === 8 ? "EIGHT" : "SIXTEEN";
-  const partBQuestions = approvedQuestions.filter(
-    (q) => q.marks === partB_marksEnum && !selectedPartA.find((a) => a.id === q.id)
+  const alreadySelectedIds = new Set(
+    existingPapers.flatMap((paper) => [
+      ...(paper.partA_questionIds || []),
+      ...(paper.partB_questionIds || []),
+    ]),
   );
 
-  if (partBQuestions.length < partBCount) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: `Not enough ${partB_marksEach}-mark questions. Need ${partBCount}, found ${partBQuestions.length}`,
-    });
+  const availableQuestions: SelectedQuestion[] = approvedQuestions
+    .filter((q) => !alreadySelectedIds.has(q.id))
+    .map((q) => ({
+      id: q.id,
+      question: q.question,
+      answer: q.answer,
+      marks: q.marks,
+      bloomLevel: q.bloomLevel,
+      unit: q.unit,
+    }));
+
+  const poolByMarks: Record<"TWO" | "EIGHT" | "SIXTEEN", SelectedQuestion[]> = {
+    TWO: availableQuestions.filter((q) => q.marks === "TWO"),
+    EIGHT: availableQuestions.filter((q) => q.marks === "EIGHT"),
+    SIXTEEN: availableQuestions.filter((q) => q.marks === "SIXTEEN"),
+  };
+
+  // Parse pattern structures
+  const partASlots = Array.isArray(pattern.partAStructure)
+    ? (pattern.partAStructure as any[])
+    : [];
+  const partBGroups = Array.isArray(pattern.partBStructure)
+    ? (pattern.partBStructure as any[])
+    : [];
+
+  const selectedPartA: SelectedQuestion[] = [];
+  const selectedPartB: SelectedQuestion[] = [];
+
+  for (let i = 0; i < partASlots.length; i += 1) {
+    const slot = partASlots[i];
+    const marks = Number(slot?.marks || 2);
+    const marksEnum = marksNumberToEnum(marks);
+    const picked = pickFromPool(poolByMarks, marksEnum);
+
+    if (picked) {
+      selectedPartA.push(picked);
+      continue;
+    }
+
+    selectedPartA.push(
+      fallbackOrThrow({
+        section: "A",
+        slotLabel: String(slot?.questionNumber || i + 1),
+        marks,
+        bloomLevel: slot?.bloomLevel,
+        unit: readPrimaryUnit(slot?.units),
+      }),
+    );
   }
 
-  // Randomly select Part B questions
-  const selectedPartB = partBQuestions
-    .sort(() => Math.random() - 0.5)
-    .slice(0, partBCount);
+  for (let groupIdx = 0; groupIdx < partBGroups.length; groupIdx += 1) {
+    const group = partBGroups[groupIdx];
+    const groupNumber = Number(group?.groupNumber || groupIdx + 1);
+
+    if (
+      group?.hasOR &&
+      Array.isArray(group?.options) &&
+      group.options.length > 0
+    ) {
+      for (let optIdx = 0; optIdx < group.options.length; optIdx += 1) {
+        const option = group.options[optIdx];
+        const slot = option?.questionSlot || {};
+        const marks = Number(slot?.marks || 16);
+        const marksEnum = marksNumberToEnum(marks);
+        const picked = pickFromPool(poolByMarks, marksEnum);
+
+        if (picked) {
+          selectedPartB.push(picked);
+          continue;
+        }
+
+        selectedPartB.push(
+          fallbackOrThrow({
+            section: "B",
+            slotLabel: `${groupNumber}${String(option?.optionLabel || "")}`,
+            marks,
+            bloomLevel: slot?.bloomLevel,
+            unit: readPrimaryUnit(slot?.units),
+          }),
+        );
+      }
+      continue;
+    }
+
+    const slot = group?.questionSlot || {};
+    const marks = Number(slot?.marks || 16);
+    const marksEnum = marksNumberToEnum(marks);
+    const picked = pickFromPool(poolByMarks, marksEnum);
+
+    if (picked) {
+      selectedPartB.push(picked);
+      continue;
+    }
+
+    selectedPartB.push(
+      fallbackOrThrow({
+        section: "B",
+        slotLabel: String(groupNumber),
+        marks,
+        bloomLevel: slot?.bloomLevel,
+        unit: readPrimaryUnit(slot?.units),
+      }),
+    );
+  }
 
   return {
     partA: selectedPartA,
@@ -101,39 +284,202 @@ async function selectQuestionsForPaper(
 function generatePaperContent(
   pattern: any,
   questions: { partA: any[]; partB: any[] },
-  course: { name: string; course_code: string }
+  course: { name: string; course_code: string; departmentName?: string | null },
 ) {
+  const partAQuestions = questions.partA.map((q, idx) => ({
+    number: idx + 1,
+    question: q.question,
+    marks: Number(q.marks === "TWO" ? 2 : q.marks === "EIGHT" ? 8 : 16),
+    bloomLevel: q.bloomLevel,
+    unit: q.unit,
+    mappingCO: q.unit ? `CO${q.unit}` : "-",
+  }));
+
+  const partBStructure = Array.isArray(pattern.partBStructure)
+    ? pattern.partBStructure
+    : [];
+  const partBQuestions: Array<{
+    number: number;
+    displayNumber: string;
+    groupNumber: number;
+    optionLabel?: string;
+    hasOR: boolean;
+    question: string;
+    marks: number;
+    bloomLevel?: string;
+    unit?: number;
+    mappingCO: string;
+  }> = [];
+
+  let partBIndex = 0;
+  let fallbackGroupNumber = 11;
+
+  for (const group of partBStructure as any[]) {
+    const groupNumber = Number(group?.groupNumber || fallbackGroupNumber);
+    if (
+      group?.hasOR &&
+      Array.isArray(group?.options) &&
+      group.options.length > 0
+    ) {
+      for (const option of group.options as any[]) {
+        const selected = questions.partB[partBIndex++];
+        if (!selected) continue;
+
+        const optionLabel =
+          String(option?.optionLabel || "")
+            .trim()
+            .toUpperCase() || undefined;
+        partBQuestions.push({
+          number: partBQuestions.length + 6,
+          displayNumber: optionLabel
+            ? `${groupNumber}${optionLabel}`
+            : String(groupNumber),
+          groupNumber,
+          optionLabel,
+          hasOR: true,
+          question: selected.question,
+          marks: Number(
+            selected.marks === "TWO" ? 2 : selected.marks === "EIGHT" ? 8 : 16,
+          ),
+          bloomLevel: selected.bloomLevel,
+          unit: selected.unit,
+          mappingCO: selected.unit ? `CO${selected.unit}` : "-",
+        });
+      }
+    } else {
+      const selected = questions.partB[partBIndex++];
+      if (!selected) continue;
+
+      partBQuestions.push({
+        number: partBQuestions.length + 6,
+        displayNumber: String(groupNumber),
+        groupNumber,
+        hasOR: false,
+        question: selected.question,
+        marks: Number(
+          selected.marks === "TWO" ? 2 : selected.marks === "EIGHT" ? 8 : 16,
+        ),
+        bloomLevel: selected.bloomLevel,
+        unit: selected.unit,
+        mappingCO: selected.unit ? `CO${selected.unit}` : "-",
+      });
+    }
+
+    fallbackGroupNumber += 1;
+  }
+
+  // Fallback if older patterns do not have expected Part B structure metadata
+  while (partBIndex < questions.partB.length) {
+    const selected = questions.partB[partBIndex++];
+    partBQuestions.push({
+      number: partBQuestions.length + 6,
+      displayNumber: String(partBQuestions.length + 6),
+      groupNumber: partBQuestions.length + 6,
+      hasOR: false,
+      question: selected.question,
+      marks: Number(
+        selected.marks === "TWO" ? 2 : selected.marks === "EIGHT" ? 8 : 16,
+      ),
+      bloomLevel: selected.bloomLevel,
+      unit: selected.unit,
+      mappingCO: selected.unit ? `CO${selected.unit}` : "-",
+    });
+  }
+
+  const now = new Date();
+  const examDate = now.toISOString().slice(0, 10);
+  const examTime = now.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  const allQuestions = [...partAQuestions, ...partBQuestions];
+  const bloomLevels = [
+    "REMEMBER",
+    "UNDERSTAND",
+    "APPLY",
+    "ANALYZE",
+    "EVALUATE",
+    "CREATE",
+  ] as const;
+
+  const courseOutcomes = Array.from(
+    new Set(allQuestions.map((q) => q.mappingCO).filter((v) => v && v !== "-")),
+  );
+
+  const bloomSummaryByCO = courseOutcomes.map((co) => {
+    const row: Record<string, number | string> = { co };
+    let total = 0;
+
+    for (const level of bloomLevels) {
+      const levelTotal = allQuestions
+        .filter((q) => q.mappingCO === co && q.bloomLevel === level)
+        .reduce((sum, q) => sum + q.marks, 0);
+      row[level] = levelTotal;
+      total += levelTotal;
+    }
+
+    row.total = total;
+    return row;
+  });
+
+  const bloomTotals = bloomLevels.reduce<Record<string, number>>(
+    (acc, level) => {
+      acc[level] = allQuestions
+        .filter((q) => q.bloomLevel === level)
+        .reduce((sum, q) => sum + q.marks, 0);
+      return acc;
+    },
+    {},
+  );
+
+  const decodedMeta = decodeInstructionsWithMeta(pattern.instructions);
+
   return JSON.stringify({
     header: {
-      institution: "MANGALAM ACADEMY OF HIGHER EDUCATION",
+      institution:
+        "KALASALINGAM ACADEMY OF RESEARCH AND EDUCATION (Deemed to be University)",
+      department:
+        course.departmentName || "OFFICE OF DEAN - FRESHMAN ENGINEERING",
       courseName: course.name,
       courseCode: course.course_code,
       academicYear: pattern.academicYear,
-      semester: pattern.semester,
+      semester: pattern.semesterType,
+      degreeYearSem: decodedMeta.degreeYearSem || "B.Tech. / I / ODD",
       examType: pattern.examType,
+      examDate,
+      examTime,
+      dateSession: decodedMeta.dateSession || `${examDate} / ${examTime}`,
       duration: pattern.duration,
       totalMarks: pattern.totalMarks,
     },
-    instructions: pattern.instructions || "Answer all questions.",
+    instructions: decodedMeta.instructions || "Answer all questions.",
     partA: {
-      title: `Part A (${pattern.partA_marksEach} marks each)`,
-      questions: questions.partA.map((q, idx) => ({
-        number: idx + 1,
-        question: q.question,
-        marks: pattern.partA_marksEach,
-        bloomLevel: q.bloomLevel,
-        unit: q.unit,
-      })),
+      title: "PART - A",
+      subtitle: "Answer All Questions",
+      questions: partAQuestions,
     },
     partB: {
-      title: `Part B (${pattern.partB_marksEach} marks each)`,
-      questions: questions.partB.map((q, idx) => ({
-        number: idx + 1,
-        question: q.question,
-        marks: pattern.partB_marksEach,
-        bloomLevel: q.bloomLevel,
-        unit: q.unit,
-      })),
+      title: "PART - B",
+      subtitle: "Answer All Questions",
+      questions: partBQuestions,
+    },
+    assessmentPattern: {
+      bloomLevels,
+      rows: bloomSummaryByCO,
+      totals: {
+        ...bloomTotals,
+        total: allQuestions.reduce((sum, q) => sum + q.marks, 0),
+      },
+    },
+    approvals: {
+      deanApproved: false,
+      deanApprovedAt: null,
+      deanApprovedById: null,
+      coeApproved: false,
+      coeApprovedAt: null,
+      coeApprovedById: null,
     },
   });
 }
@@ -158,20 +504,44 @@ function generateAnswerKeyContent(questions: { partA: any[]; partB: any[] }) {
   });
 }
 
+async function regenerateAnswerForQuestion(question: string, marks: number) {
+  const prompt = `You are an expert university examiner. Generate a model answer for the following question.
+
+Question: ${question}
+Marks: ${marks}
+
+Requirements:
+- Keep it concise and scoring-oriented.
+- Use clear key points suitable for answer-key evaluation.
+- Include important formulas/steps when relevant.
+- Do not include markdown headings.`;
+
+  return generateAIText(prompt, {
+    temperature: 0.4,
+  });
+}
+
 /**
  * Paper Router
- * Handles question paper generation (COE only) and viewing
+ * Handles question paper generation and confidential paper operations
  */
 export const paperRouter = createTRPCRouter({
+  getCommitteeContext: paperCommitteeProcedure.query(({ ctx }) => {
+    return {
+      role: ctx.session?.user?.role,
+      userId: ctx.session?.user?.id,
+    };
+  }),
+
   /**
-   * Generate question paper from approved pattern (COE only)
+   * Generate question paper from approved pattern (paper committee)
    */
-  generatePaper: coordinatorProcedure
+  generatePaper: paperCommitteeProcedure
     .input(
       z.object({
         patternId: z.string(),
         setVariant: z.string().default("SET-A"),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       if (!ctx.session) {
@@ -181,14 +551,14 @@ export const paperRouter = createTRPCRouter({
         });
       }
 
-      const userRole = ctx.session.user.role;
       const userId = ctx.session.user.id;
+      const userRole = ctx.session.user.role;
 
-      // Only COE can generate papers
-      if (userRole !== "CONTROLLER_OF_EXAMINATION") {
+      if (userRole !== "HOD") {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "Only Controller of Examination can generate papers",
+          message:
+            "Only HoD can generate question papers after coordinator approvals",
         });
       }
 
@@ -203,6 +573,33 @@ export const paperRouter = createTRPCRouter({
       // Get the pattern
       const pattern = await prisma.questionPaperPattern.findUnique({
         where: { id: input.patternId },
+        select: {
+          id: true,
+          courseId: true,
+          status: true,
+          mcApproved: true,
+          pcApproved: true,
+          createdByRole: true,
+          academicYear: true,
+          semesterType: true,
+          examType: true,
+          totalMarks: true,
+          duration: true,
+          partAStructure: true,
+          partBStructure: true,
+          instructions: true,
+          course: {
+            select: {
+              departmentId: true,
+              department: {
+                select: {
+                  hodId: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
       });
 
       if (!pattern) {
@@ -219,10 +616,42 @@ export const paperRouter = createTRPCRouter({
         });
       }
 
+      if (
+        !pattern.mcApproved ||
+        !pattern.pcApproved ||
+        pattern.createdByRole !== "COURSE_COORDINATOR"
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Pattern must complete CC -> MC -> PC approvals before paper generation",
+        });
+      }
+
+      if (
+        !pattern.course.departmentId ||
+        pattern.course.department?.hodId !== userId
+      ) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            "You can only generate papers for courses in your department as assigned HoD",
+        });
+      }
+
       // Get course details
       const course = await prisma.course.findUnique({
         where: { id: pattern.courseId },
-        select: { name: true, course_code: true },
+        select: {
+          departmentId: true,
+          name: true,
+          course_code: true,
+          department: {
+            select: {
+              name: true,
+            },
+          },
+        },
       });
 
       if (!course) {
@@ -232,10 +661,18 @@ export const paperRouter = createTRPCRouter({
         });
       }
 
+      if (!course.departmentId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Course must be mapped to a department before paper generation",
+        });
+      }
+
       // Select questions based on pattern
       const selectedQuestions = await selectQuestionsForPaper(
         pattern.courseId,
-        pattern
+        pattern,
       );
 
       // Generate paper code
@@ -254,11 +691,11 @@ export const paperRouter = createTRPCRouter({
       }
 
       // Generate paper content
-      const paperContent = generatePaperContent(
-        pattern,
-        selectedQuestions,
-        course
-      );
+      const paperContent = generatePaperContent(pattern, selectedQuestions, {
+        name: course.name,
+        course_code: course.course_code,
+        departmentName: course.department?.name,
+      });
 
       // Generate answer key
       const answerKeyContent = generateAnswerKeyContent(selectedQuestions);
@@ -288,14 +725,14 @@ export const paperRouter = createTRPCRouter({
     }),
 
   /**
-   * Get all generated papers (COE only)
+   * Get all generated papers (paper committee)
    */
-  getPapers: coordinatorProcedure
+  getPapers: paperCommitteeProcedure
     .input(
       z.object({
         courseId: z.string().optional(),
         status: z.enum(["DRAFT", "GENERATED", "FINALIZED"]).optional(),
-      })
+      }),
     )
     .query(async ({ ctx, input }) => {
       if (!ctx.session) {
@@ -305,16 +742,8 @@ export const paperRouter = createTRPCRouter({
         });
       }
 
+      const userId = ctx.session.user.id;
       const userRole = ctx.session.user.role;
-
-      // Only COE can view papers
-      if (userRole !== "CONTROLLER_OF_EXAMINATION") {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Controller of Examination can view papers",
-        });
-      }
-
       const where: any = {};
 
       if (input.courseId) {
@@ -323,6 +752,24 @@ export const paperRouter = createTRPCRouter({
 
       if (input.status) {
         where.status = input.status;
+      }
+
+      if (userRole === "HOD") {
+        where.pattern = {
+          course: {
+            department: {
+              hodId: userId,
+            },
+          },
+        };
+      } else if (userRole === "DEAN") {
+        where.pattern = {
+          course: {
+            department: {
+              deanId: userId,
+            },
+          },
+        };
       }
 
       const papers = await prisma.questionPaper.findMany({
@@ -338,6 +785,7 @@ export const paperRouter = createTRPCRouter({
               totalMarks: true,
               course: {
                 select: {
+                  departmentId: true,
                   course_code: true,
                   name: true,
                 },
@@ -351,9 +799,9 @@ export const paperRouter = createTRPCRouter({
     }),
 
   /**
-   * Get paper by ID (COE only)
+   * Get paper by ID (paper committee)
    */
-  getPaperById: coordinatorProcedure
+  getPaperById: paperCommitteeProcedure
     .input(z.object({ paperId: z.string() }))
     .query(async ({ ctx, input }) => {
       if (!ctx.session) {
@@ -363,15 +811,8 @@ export const paperRouter = createTRPCRouter({
         });
       }
 
+      const userId = ctx.session.user.id;
       const userRole = ctx.session.user.role;
-
-      // Only COE can view papers
-      if (userRole !== "CONTROLLER_OF_EXAMINATION") {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Controller of Examination can view papers",
-        });
-      }
 
       const paper = await prisma.questionPaper.findUnique({
         where: { id: input.paperId },
@@ -380,6 +821,12 @@ export const paperRouter = createTRPCRouter({
             include: {
               course: {
                 select: {
+                  department: {
+                    select: {
+                      hodId: true,
+                      deanId: true,
+                    },
+                  },
                   course_code: true,
                   name: true,
                 },
@@ -396,13 +843,25 @@ export const paperRouter = createTRPCRouter({
         });
       }
 
+      if (
+        (userRole === "HOD" &&
+          paper.pattern.course.department?.hodId !== userId) ||
+        (userRole === "DEAN" &&
+          paper.pattern.course.department?.deanId !== userId)
+      ) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You do not have access to this paper",
+        });
+      }
+
       return paper;
     }),
 
   /**
-   * Finalize paper (COE only)
+   * Finalize paper (paper committee)
    */
-  finalizePaper: coordinatorProcedure
+  finalizePaper: paperCommitteeProcedure
     .input(z.object({ paperId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       if (!ctx.session) {
@@ -412,15 +871,65 @@ export const paperRouter = createTRPCRouter({
         });
       }
 
-      const userRole = ctx.session.user.role;
-
-      // Only COE can finalize papers
-      if (userRole !== "CONTROLLER_OF_EXAMINATION") {
+      if (ctx.session.user.role !== "CONTROLLER_OF_EXAMINATION") {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Controller of Examination can finalize papers",
         });
       }
+
+      const existingPaper = await prisma.questionPaper.findUnique({
+        where: { id: input.paperId },
+        select: {
+          id: true,
+          isFinalized: true,
+          paperContent: true,
+        },
+      });
+
+      if (!existingPaper) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Paper not found",
+        });
+      }
+
+      if (existingPaper.isFinalized) {
+        return {
+          success: true,
+          alreadyFinalized: true,
+        };
+      }
+
+      let paperContent: any;
+      try {
+        paperContent = existingPaper.paperContent
+          ? JSON.parse(existingPaper.paperContent)
+          : {};
+      } catch {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Paper content is corrupted",
+        });
+      }
+
+      const deanApproved = Boolean(paperContent?.approvals?.deanApproved);
+      if (!deanApproved) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Dean approval is required before COE final approval",
+        });
+      }
+
+      if (
+        !paperContent.approvals ||
+        typeof paperContent.approvals !== "object"
+      ) {
+        paperContent.approvals = {};
+      }
+      paperContent.approvals.coeApproved = true;
+      paperContent.approvals.coeApprovedAt = new Date().toISOString();
+      paperContent.approvals.coeApprovedById = ctx.session.user.id;
 
       const paper = await prisma.questionPaper.update({
         where: { id: input.paperId },
@@ -428,6 +937,7 @@ export const paperRouter = createTRPCRouter({
           status: "FINALIZED",
           isFinalized: true,
           finalizedAt: new Date(),
+          paperContent: JSON.stringify(paperContent),
         },
       });
 
@@ -437,10 +947,7 @@ export const paperRouter = createTRPCRouter({
       };
     }),
 
-  /**
-   * Delete paper (COE only, only if not finalized)
-   */
-  deletePaper: coordinatorProcedure
+  approvePaperByDean: paperCommitteeProcedure
     .input(z.object({ paperId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       if (!ctx.session) {
@@ -450,10 +957,98 @@ export const paperRouter = createTRPCRouter({
         });
       }
 
-      const userRole = ctx.session.user.role;
+      if (ctx.session.user.role !== "DEAN") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only Dean can approve generated papers at this stage",
+        });
+      }
 
-      // Only COE can delete papers
-      if (userRole !== "CONTROLLER_OF_EXAMINATION") {
+      const paper = await prisma.questionPaper.findUnique({
+        where: { id: input.paperId },
+        select: {
+          id: true,
+          isFinalized: true,
+          paperContent: true,
+          course: {
+            select: {
+              department: {
+                select: {
+                  deanId: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!paper) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Paper not found" });
+      }
+
+      if (paper.isFinalized) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Finalized papers cannot be re-approved",
+        });
+      }
+
+      if (paper.course.department?.deanId !== ctx.session.user.id) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You can only approve papers for your department",
+        });
+      }
+
+      let paperContent: any;
+      try {
+        paperContent = paper.paperContent ? JSON.parse(paper.paperContent) : {};
+      } catch {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Paper content is corrupted",
+        });
+      }
+
+      if (
+        !paperContent.approvals ||
+        typeof paperContent.approvals !== "object"
+      ) {
+        paperContent.approvals = {};
+      }
+
+      if (paperContent.approvals.deanApproved) {
+        return { success: true, alreadyApproved: true };
+      }
+
+      paperContent.approvals.deanApproved = true;
+      paperContent.approvals.deanApprovedAt = new Date().toISOString();
+      paperContent.approvals.deanApprovedById = ctx.session.user.id;
+
+      await prisma.questionPaper.update({
+        where: { id: input.paperId },
+        data: {
+          paperContent: JSON.stringify(paperContent),
+        },
+      });
+
+      return { success: true };
+    }),
+
+  /**
+   * Delete paper (paper committee, only if not finalized)
+   */
+  deletePaper: paperCommitteeProcedure
+    .input(z.object({ paperId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.session) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "Not authenticated",
+        });
+      }
+
+      if (ctx.session.user.role !== "CONTROLLER_OF_EXAMINATION") {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Controller of Examination can delete papers",
@@ -462,6 +1057,10 @@ export const paperRouter = createTRPCRouter({
 
       const paper = await prisma.questionPaper.findUnique({
         where: { id: input.paperId },
+        select: {
+          id: true,
+          isFinalized: true,
+        },
       });
 
       if (!paper) {
@@ -486,5 +1085,211 @@ export const paperRouter = createTRPCRouter({
         success: true,
         message: "Paper deleted successfully",
       };
+    }),
+
+  updatePaperQuestion: paperCommitteeProcedure
+    .input(
+      z.object({
+        paperId: z.string(),
+        section: z.enum(["partA", "partB"]),
+        questionNumber: z.number().int().positive(),
+        question: z.string().min(10, "Question must be at least 10 characters"),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const paper = await prisma.questionPaper.findUnique({
+        where: { id: input.paperId },
+        select: {
+          id: true,
+          paperContent: true,
+          answerKeyContent: true,
+        },
+      });
+
+      if (!paper) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Paper not found" });
+      }
+
+      let paperContent: any;
+      let answerKeyContent: any;
+
+      try {
+        paperContent = paper.paperContent ? JSON.parse(paper.paperContent) : {};
+        answerKeyContent = paper.answerKeyContent
+          ? JSON.parse(paper.answerKeyContent)
+          : { partA: [], partB: [] };
+      } catch {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Paper content is corrupted and cannot be edited",
+        });
+      }
+
+      const paperSection = paperContent?.[input.section]?.questions;
+      const answerSection = answerKeyContent?.[input.section];
+
+      if (!Array.isArray(paperSection) || !Array.isArray(answerSection)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Paper sections are not in expected format",
+        });
+      }
+
+      const questionIndex = paperSection.findIndex(
+        (item: { number?: number }) => item.number === input.questionNumber,
+      );
+
+      if (questionIndex === -1) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Question not found in this paper section",
+        });
+      }
+
+      paperSection[questionIndex].question = input.question;
+      if (answerSection[questionIndex]) {
+        answerSection[questionIndex].question = input.question;
+      }
+
+      await prisma.questionPaper.update({
+        where: { id: input.paperId },
+        data: {
+          paperContent: JSON.stringify(paperContent),
+          answerKeyContent: JSON.stringify(answerKeyContent),
+        },
+      });
+
+      return { success: true };
+    }),
+
+  regeneratePaperAnswerForQuestion: paperCommitteeProcedure
+    .input(
+      z.object({
+        paperId: z.string(),
+        section: z.enum(["partA", "partB"]),
+        questionNumber: z.number().int().positive(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const paper = await prisma.questionPaper.findUnique({
+        where: { id: input.paperId },
+        select: {
+          id: true,
+          paperContent: true,
+          answerKeyContent: true,
+        },
+      });
+
+      if (!paper) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Paper not found" });
+      }
+
+      let paperContent: any;
+      let answerKeyContent: any;
+
+      try {
+        paperContent = paper.paperContent ? JSON.parse(paper.paperContent) : {};
+        answerKeyContent = paper.answerKeyContent
+          ? JSON.parse(paper.answerKeyContent)
+          : { partA: [], partB: [] };
+      } catch {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Paper content is corrupted and cannot regenerate answers",
+        });
+      }
+
+      const paperSection = paperContent?.[input.section]?.questions;
+      const answerSection = answerKeyContent?.[input.section];
+
+      if (!Array.isArray(paperSection) || !Array.isArray(answerSection)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Paper sections are not in expected format",
+        });
+      }
+
+      const questionIndex = paperSection.findIndex(
+        (item: { number?: number }) => item.number === input.questionNumber,
+      );
+
+      if (questionIndex === -1) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Question not found in this paper section",
+        });
+      }
+
+      const currentQuestion = paperSection[questionIndex];
+      const regeneratedAnswer = await regenerateAnswerForQuestion(
+        currentQuestion.question,
+        Number(currentQuestion.marks || 0),
+      );
+
+      if (answerSection[questionIndex]) {
+        answerSection[questionIndex].question = currentQuestion.question;
+        answerSection[questionIndex].answer = regeneratedAnswer;
+      }
+
+      await prisma.questionPaper.update({
+        where: { id: input.paperId },
+        data: {
+          answerKeyContent: JSON.stringify(answerKeyContent),
+        },
+      });
+
+      return {
+        success: true,
+        answer: regeneratedAnswer,
+      };
+    }),
+
+  updatePaperDateTime: paperCommitteeProcedure
+    .input(
+      z.object({
+        paperId: z.string(),
+        examDate: z.string().min(1, "Exam date is required"),
+        examTime: z.string().min(1, "Exam time is required"),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const paper = await prisma.questionPaper.findUnique({
+        where: { id: input.paperId },
+        select: {
+          id: true,
+          paperContent: true,
+        },
+      });
+
+      if (!paper) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Paper not found" });
+      }
+
+      let paperContent: any;
+      try {
+        paperContent = paper.paperContent ? JSON.parse(paper.paperContent) : {};
+      } catch {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Paper content is corrupted and cannot be edited",
+        });
+      }
+
+      if (!paperContent.header || typeof paperContent.header !== "object") {
+        paperContent.header = {};
+      }
+
+      paperContent.header.examDate = input.examDate;
+      paperContent.header.examTime = input.examTime;
+      paperContent.header.dateSession = `${input.examDate} / ${input.examTime}`;
+
+      await prisma.questionPaper.update({
+        where: { id: input.paperId },
+        data: {
+          paperContent: JSON.stringify(paperContent),
+        },
+      });
+
+      return { success: true };
     }),
 });

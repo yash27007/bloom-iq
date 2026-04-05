@@ -23,6 +23,7 @@ import { Upload, FileText, CheckCircle, AlertCircle, X, Loader2, FileSearch, Boo
 import { useDropzone } from "react-dropzone";
 import { trpc } from "@/trpc/client";
 import { toast } from "sonner";
+import { exportComplianceReportToPDF } from "@/lib/pdf-export";
 
 interface ValidationResult {
     isValid: boolean;
@@ -56,6 +57,28 @@ interface ValidationResult {
         missingCOs: string[];
         unmappedQuestions: number;
     };
+    complianceReport: {
+        generatedAt: string;
+        overallComplianceScore: number;
+        totalIssueCount: number;
+        items: Array<{
+            questionNumber: string;
+            questionText: string;
+            current: {
+                marks: number;
+                part?: "A" | "B";
+                bloomLevel?: string;
+                courseOutcome?: string;
+            };
+            issues: string[];
+            suggestions: string[];
+            suggestedMarks?: number;
+            suggestedBloomLevel?: string;
+            suggestedCourseOutcome?: string;
+            isCompliant: boolean;
+        }>;
+        generalRecommendations: string[];
+    };
 }
 
 export default function ValidateQuestionPaperPage() {
@@ -69,13 +92,13 @@ export default function ValidateQuestionPaperPage() {
 
     // tRPC queries
     const { data: courses = [], isLoading: coursesLoading } = trpc.coordinator.getCoursesForMaterialUpload.useQuery();
-    
+
     // Check syllabus existence - use query with enabled flag
     const { data: syllabusData, isLoading: syllabusLoading, refetch: checkSyllabus, isError: syllabusError } = trpc.coordinator.checkSyllabusExists.useQuery(
         { courseId: selectedCourse },
         { enabled: !!selectedCourse }
     );
-    
+
     // Sync syllabus check state with query data
     useEffect(() => {
         if (syllabusData) {
@@ -88,6 +111,7 @@ export default function ValidateQuestionPaperPage() {
         onSuccess: (result) => {
             setValidationResult(result);
             setValidating(false);
+            setUploading(false);
             if (result.isValid) {
                 toast.success("Question paper validation completed successfully!");
             } else {
@@ -97,8 +121,33 @@ export default function ValidateQuestionPaperPage() {
         onError: (error) => {
             toast.error(error.message || "Failed to validate question paper");
             setValidating(false);
+            setUploading(false);
         },
     });
+
+    const handleDownloadReport = useCallback(() => {
+        if (!validationResult) return;
+
+        const selectedCourseData = courses.find((course) => course.id === selectedCourse);
+        const courseName = selectedCourseData
+            ? `${selectedCourseData.course_code} - ${selectedCourseData.name}`
+            : "Selected Course";
+
+        try {
+            exportComplianceReportToPDF({
+                title: "Question Paper Compliance Report",
+                courseName,
+                generatedAt: validationResult.complianceReport.generatedAt,
+                overallComplianceScore: validationResult.complianceReport.overallComplianceScore,
+                totalIssueCount: validationResult.complianceReport.totalIssueCount,
+                summary: validationResult.summary,
+                items: validationResult.complianceReport.items,
+                generalRecommendations: validationResult.complianceReport.generalRecommendations,
+            });
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to export report");
+        }
+    }, [validationResult, courses, selectedCourse]);
 
     const uploadFile = useCallback(async (file: File) => {
         if (!selectedCourse) {
@@ -253,11 +302,10 @@ export default function ValidateQuestionPaperPage() {
                         {/* Upload Area */}
                         <div
                             {...getRootProps()}
-                            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-                                isDragActive
+                            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${isDragActive
                                     ? "border-primary bg-primary/5"
                                     : "border-muted-foreground/25 hover:border-primary/50"
-                            } ${uploading || validating || !selectedCourse ? "opacity-50 cursor-not-allowed" : ""}`}
+                                } ${uploading || validating || !selectedCourse ? "opacity-50 cursor-not-allowed" : ""}`}
                         >
                             <input {...getInputProps()} />
                             <div className="flex flex-col items-center gap-4">
@@ -299,9 +347,14 @@ export default function ValidateQuestionPaperPage() {
                         <CardHeader>
                             <div className="flex items-center justify-between">
                                 <CardTitle>Validation Results</CardTitle>
-                                <Badge variant={validationResult.isValid ? "default" : "destructive"}>
-                                    {validationResult.isValid ? "Valid" : "Invalid"}
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                    <Badge variant={validationResult.isValid ? "default" : "destructive"}>
+                                        {validationResult.isValid ? "Valid" : "Invalid"}
+                                    </Badge>
+                                    <Button variant="outline" size="sm" onClick={handleDownloadReport}>
+                                        Download Compliance Report
+                                    </Button>
+                                </div>
                             </div>
                         </CardHeader>
                         <CardContent className="space-y-4">
@@ -324,6 +377,14 @@ export default function ValidateQuestionPaperPage() {
                                     <div>
                                         <span className="text-muted-foreground">Part B Marks:</span>
                                         <span className="ml-2 font-medium">{validationResult.markDistribution.partB}</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-muted-foreground">Compliance Score:</span>
+                                        <span className="ml-2 font-medium">{validationResult.complianceReport.overallComplianceScore}%</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-muted-foreground">Total Issues:</span>
+                                        <span className="ml-2 font-medium">{validationResult.complianceReport.totalIssueCount}</span>
                                     </div>
                                 </div>
                             </div>
@@ -372,6 +433,18 @@ export default function ValidateQuestionPaperPage() {
                                             </div>
                                         ))}
                                     </div>
+                                </div>
+                            )}
+
+                            {/* General Recommendations */}
+                            {validationResult.complianceReport.generalRecommendations.length > 0 && (
+                                <div className="space-y-2">
+                                    <h3 className="font-semibold">General Recommendations</h3>
+                                    <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                                        {validationResult.complianceReport.generalRecommendations.map((recommendation, idx) => (
+                                            <li key={idx}>{recommendation}</li>
+                                        ))}
+                                    </ul>
                                 </div>
                             )}
                         </CardContent>
@@ -450,6 +523,52 @@ export default function ValidateQuestionPaperPage() {
                                             <p className="text-sm text-muted-foreground line-clamp-2">
                                                 {q.questionText}
                                             </p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <Separator />
+
+                        {/* Compliance Improvement Report */}
+                        {validationResult.complianceReport.items.length > 0 && (
+                            <div className="space-y-2">
+                                <h3 className="font-semibold">Compliance Improvements</h3>
+                                <div className="space-y-3 max-h-[32rem] overflow-y-auto">
+                                    {validationResult.complianceReport.items.map((item, idx) => (
+                                        <div key={idx} className="p-3 border rounded space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <Badge variant="outline">Q{item.questionNumber}</Badge>
+                                                    <Badge variant={item.isCompliant ? "default" : "secondary"}>
+                                                        {item.isCompliant ? "Compliant" : "Needs Improvement"}
+                                                    </Badge>
+                                                </div>
+                                            </div>
+                                            <p className="text-sm text-muted-foreground">{item.questionText}</p>
+
+                                            {item.issues.length > 0 && (
+                                                <div>
+                                                    <p className="text-sm font-medium text-destructive">Issues</p>
+                                                    <ul className="list-disc list-inside text-sm text-destructive mt-1 space-y-1">
+                                                        {item.issues.map((issue, issueIdx) => (
+                                                            <li key={issueIdx}>{issue}</li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
+
+                                            {item.suggestions.length > 0 && (
+                                                <div>
+                                                    <p className="text-sm font-medium">Suggested Improvements</p>
+                                                    <ul className="list-disc list-inside text-sm text-muted-foreground mt-1 space-y-1">
+                                                        {item.suggestions.map((suggestion, suggestionIdx) => (
+                                                            <li key={suggestionIdx}>{suggestion}</li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>

@@ -22,6 +22,7 @@ import {
 import { toast } from 'sonner';
 import { trpc } from '@/trpc/client';
 import { exportQuestionsToPDF } from '@/lib/pdf-export';
+import { RichContentRenderer } from '@/components/ui/rich-content-renderer';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -463,15 +464,15 @@ export default function ReviewQuestionsPage() {
                                         <div className="space-y-4 pl-8">
                                             <div className="space-y-2">
                                                 <Label className="text-sm font-medium">Question:</Label>
-                                                <p className="text-sm bg-gray-50 dark:bg-gray-900 p-3 rounded whitespace-pre-wrap">
-                                                    {question.question}
-                                                </p>
+                                                <div className="text-sm bg-gray-50 dark:bg-gray-900 p-3 rounded">
+                                                    <RichContentRenderer content={question.question} />
+                                                </div>
                                             </div>
                                             <div className="space-y-2">
                                                 <Label className="text-sm font-medium">Answer:</Label>
-                                                <p className="text-sm bg-green-50 dark:bg-green-950 p-3 rounded whitespace-pre-wrap">
-                                                    {question.answer}
-                                                </p>
+                                                <div className="text-sm bg-green-50 dark:bg-green-950 p-3 rounded">
+                                                    <RichContentRenderer content={question.answer} />
+                                                </div>
                                             </div>
                                         </div>
                                     )}

@@ -234,7 +234,7 @@ export default function GeneratePaperPage() {
                                             Pattern Fully Approved
                                         </p>
                                         <p className="text-xs text-green-700 dark:text-green-300">
-                                            Approved by MC, PC, and COE
+                                            Approved by MC and PC
                                         </p>
                                     </div>
                                 </div>

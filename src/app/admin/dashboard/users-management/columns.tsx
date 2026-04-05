@@ -23,6 +23,7 @@ export type UserTableData = {
     facultyId: string;
     role: string;
     designation: string;
+    department?: { id: string; code: string; name: string } | null;
     isActive: boolean;
     courseCoordinatorCourses?: Array<{ id: string; course_code: string; name: string }>;
     moduleCoordinatorCourses?: Array<{ id: string; course_code: string; name: string }>;
@@ -129,7 +130,8 @@ export const createColumns = ({ onEdit, onDelete }: ColumnsProps): ColumnDef<Use
                 COURSE_COORDINATOR: "default",
                 MODULE_COORDINATOR: "secondary",
                 PROGRAM_COORDINATOR: "default",
-                CONTROLLER_OF_EXAMINATION: "default",
+                HOD: "secondary",
+                DEAN: "default",
             } as const;
 
             return (
@@ -143,8 +145,24 @@ export const createColumns = ({ onEdit, onDelete }: ColumnsProps): ColumnDef<Use
         },
     },
     {
+        id: "department",
+        header: "Department",
+        cell: ({ row }) => {
+            const department = row.original.department;
+            if (!department) {
+                return <span className="text-muted-foreground">Not assigned</span>;
+            }
+
+            return (
+                <Badge variant="outline" className="text-xs">
+                    {department.code}
+                </Badge>
+            );
+        },
+    },
+    {
         id: "courses",
-        header: "Assigned Course",
+        header: "Assigned Courses",
         cell: ({ row }) => {
             const user = row.original;
             const allCourses = [
@@ -157,12 +175,8 @@ export const createColumns = ({ onEdit, onDelete }: ColumnsProps): ColumnDef<Use
                 return <span className="text-muted-foreground">No course assigned</span>;
             }
 
-            // Based on your requirement: each user can have only one course
-            const course = allCourses[0];
             return (
-                <Badge variant="outline" className="text-xs">
-                    {course.course_code}
-                </Badge>
+                <span className="text-sm">{allCourses.length}</span>
             );
         }
     },

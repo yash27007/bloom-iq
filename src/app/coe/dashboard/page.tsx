@@ -14,6 +14,23 @@ import { useRouter } from "next/navigation";
 
 export default function CoeDashboardPage() {
     const router = useRouter();
+    const { data: committeeContext } = trpc.paper.getCommitteeContext.useQuery();
+    const currentRole = committeeContext?.role;
+    const canGenerate = currentRole === "HOD";
+
+    const dashboardTitle =
+        currentRole === "HOD"
+            ? "HoD Dashboard"
+            : currentRole === "DEAN"
+                ? "Dean Dashboard"
+                : "CoE Dashboard";
+
+    const dashboardSubtitle =
+        currentRole === "HOD"
+            ? "Generate papers from fully coordinator-approved patterns"
+            : currentRole === "DEAN"
+                ? "Review papers in your departmental approval stage"
+                : "Finalize dean-approved papers in the final committee stage";
 
     // Get statistics
     const { data: papers, isLoading: papersLoading } =
@@ -31,9 +48,9 @@ export default function CoeDashboardPage() {
         <div className="container mx-auto py-6 space-y-6">
             {/* Header */}
             <div>
-                <h1 className="text-3xl font-bold">COE Dashboard</h1>
+                <h1 className="text-3xl font-bold">{dashboardTitle}</h1>
                 <p className="text-muted-foreground">
-                    Controller of Examination - Manage Question Papers
+                    {dashboardSubtitle}
                 </p>
             </div>
 
@@ -105,17 +122,19 @@ export default function CoeDashboardPage() {
                 <CardHeader>
                     <CardTitle>Quick Actions</CardTitle>
                     <CardDescription>
-                        Generate and manage question papers
+                        HoD -&gt; Dean -&gt; CoE workflow actions
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-wrap gap-4">
-                    <Button
-                        onClick={() => router.push("/coe/dashboard/generate-paper")}
-                        size="lg"
-                    >
-                        <Plus className="mr-2 h-5 w-5" />
-                        Generate New Paper
-                    </Button>
+                    {canGenerate && (
+                        <Button
+                            onClick={() => router.push("/coe/dashboard/generate-paper")}
+                            size="lg"
+                        >
+                            <Plus className="mr-2 h-5 w-5" />
+                            Generate New Paper
+                        </Button>
+                    )}
                     <Button
                         variant="outline"
                         onClick={() => router.push("/coe/dashboard/view-papers")}
@@ -181,10 +200,17 @@ export default function CoeDashboardPage() {
                             <p className="text-muted-foreground mb-4">
                                 No papers generated yet
                             </p>
-                            <Button onClick={() => router.push("/coe/dashboard/generate-paper")}>
-                                <Plus className="mr-2 h-4 w-4" />
-                                Generate Your First Paper
-                            </Button>
+                            {canGenerate ? (
+                                <Button onClick={() => router.push("/coe/dashboard/generate-paper")}>
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    Generate Your First Paper
+                                </Button>
+                            ) : (
+                                <Button variant="outline" onClick={() => router.push("/coe/dashboard/view-papers")}>
+                                    <Eye className="mr-2 h-4 w-4" />
+                                    Open Papers List
+                                </Button>
+                            )}
                         </div>
                     )}
                 </CardContent>

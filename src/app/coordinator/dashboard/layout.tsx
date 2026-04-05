@@ -28,7 +28,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         redirect("/sign-in");
     }
 
-    const allowedRoles = ["COURSE_COORDINATOR", "MODULE_COORDINATOR", "PROGRAM_COORDINATOR", "CONTROLLER_OF_EXAMINATION"];
+    const allowedRoles = ["COURSE_COORDINATOR", "MODULE_COORDINATOR", "PROGRAM_COORDINATOR", "HOD", "DEAN"];
 
     if (!allowedRoles.includes(session.user.role)) {
         redirect("/unauthorized");

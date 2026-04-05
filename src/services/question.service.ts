@@ -16,7 +16,7 @@ import type {
   DifficultyLevel,
   GenerationType,
   Marks,
-} from "@/generated/prisma";
+} from "@/generated/prisma/client";
 import type { ServiceResult } from "./types";
 
 /**
@@ -106,7 +106,7 @@ export class QuestionService {
    * Create a new question
    */
   static async createQuestion(
-    input: CreateQuestionInput
+    input: CreateQuestionInput,
   ): Promise<ServiceResult<QuestionResponse>> {
     const question = await prisma.question.create({
       data: {
@@ -159,7 +159,7 @@ export class QuestionService {
    * Bulk create questions (for AI generation)
    */
   static async createQuestions(
-    questions: CreateQuestionInput[]
+    questions: CreateQuestionInput[],
   ): Promise<ServiceResult<QuestionResponse[]>> {
     const createdQuestions = await prisma.question.createMany({
       data: questions.map((q) => ({
@@ -187,7 +187,7 @@ export class QuestionService {
    * Get question by ID with feedback
    */
   static async getQuestionById(
-    id: string
+    id: string,
   ): Promise<ServiceResult<QuestionWithFeedback>> {
     const question = await prisma.question.findUnique({
       where: { id },
@@ -244,7 +244,7 @@ export class QuestionService {
    * If question was rejected, reset status and approval flags for resubmission
    */
   static async updateQuestion(
-    input: UpdateQuestionInput
+    input: UpdateQuestionInput,
   ): Promise<ServiceResult<QuestionResponse>> {
     const { id, ...updates } = input;
 
@@ -298,9 +298,10 @@ export class QuestionService {
 
     return {
       data: question as QuestionResponse,
-      message: existingQuestion?.status === "REJECTED"
-        ? "Question updated and ready for resubmission."
-        : "Question updated successfully.",
+      message:
+        existingQuestion?.status === "REJECTED"
+          ? "Question updated and ready for resubmission."
+          : "Question updated successfully.",
     };
   }
 
@@ -316,7 +317,7 @@ export class QuestionService {
    * Course Coordinator approves question
    */
   static async approveQuestionByCourseCoordinator(
-    questionId: string
+    questionId: string,
   ): Promise<ServiceResult<QuestionResponse>> {
     const question = await prisma.question.update({
       where: { id: questionId },
@@ -361,7 +362,7 @@ export class QuestionService {
    * Module Coordinator approves question
    */
   static async approveQuestionByModuleCoordinator(
-    questionId: string
+    questionId: string,
   ): Promise<ServiceResult<QuestionResponse>> {
     const question = await prisma.question.update({
       where: { id: questionId },
@@ -406,7 +407,7 @@ export class QuestionService {
    * Program Coordinator approves question (final approval)
    */
   static async approveQuestionByProgramCoordinator(
-    questionId: string
+    questionId: string,
   ): Promise<ServiceResult<QuestionResponse>> {
     const question = await prisma.question.update({
       where: { id: questionId },
@@ -455,7 +456,7 @@ export class QuestionService {
   static async rejectQuestion(
     questionId: string,
     remarks: string,
-    rejectedByRole: "CC" | "MC" | "PC"
+    rejectedByRole: "CC" | "MC" | "PC",
   ): Promise<ServiceResult<QuestionResponse>> {
     // Add feedback
     await prisma.question_Feedback.create({
@@ -513,7 +514,7 @@ export class QuestionService {
       unit?: number;
       bloomLevel?: BloomLevel;
       difficultyLevel?: DifficultyLevel;
-    }
+    },
   ): Promise<ServiceResult<QuestionResponse[]>> {
     const questions = await prisma.question.findMany({
       where: {
@@ -560,7 +561,7 @@ export class QuestionService {
    */
   static async getQuestionsPendingReview(
     coordinatorId: string,
-    role: "COURSE_COORDINATOR" | "MODULE_COORDINATOR" | "PROGRAM_COORDINATOR"
+    role: "COURSE_COORDINATOR" | "MODULE_COORDINATOR" | "PROGRAM_COORDINATOR",
   ): Promise<ServiceResult<QuestionWithFeedback[]>> {
     let statusFilter: QuestionStatus[] = [];
 
@@ -580,8 +581,8 @@ export class QuestionService {
             role === "COURSE_COORDINATOR"
               ? [{ courseCoordinatorId: coordinatorId }]
               : role === "MODULE_COORDINATOR"
-              ? [{ moduleCoordinatorId: coordinatorId }]
-              : [{ programCoordinatorId: coordinatorId }],
+                ? [{ moduleCoordinatorId: coordinatorId }]
+                : [{ programCoordinatorId: coordinatorId }],
         },
       },
       select: {

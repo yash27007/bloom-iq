@@ -37,7 +37,6 @@ interface Pattern {
     status: string;
     mcApproved: boolean;
     pcApproved: boolean;
-    coeApproved: boolean;
     createdAt: Date;
     partAStructure: unknown;
     partBStructure: unknown;
@@ -112,7 +111,6 @@ export default function ApprovePatterns() {
     const getApprovalStatus = (pattern: Pattern) => {
         if (pattern.status === "PENDING_MC_APPROVAL") return "Pending MC Approval";
         if (pattern.status === "PENDING_PC_APPROVAL") return "Pending PC Approval";
-        if (pattern.status === "PENDING_COE_APPROVAL") return "Pending COE Approval";
         if (pattern.status === "APPROVED") return "Approved";
         if (pattern.status === "REJECTED") return "Rejected";
         return pattern.status;
@@ -230,13 +228,13 @@ export default function ApprovePatterns() {
                                     </div>
                                     <div className="flex-1 border-t" />
                                     <div className="flex items-center gap-2">
-                                        {pattern.coeApproved ? (
+                                        {pattern.status === "APPROVED" ? (
                                             <CheckCircle className="h-4 w-4 text-green-600" />
                                         ) : (
                                             <div className="h-4 w-4 rounded-full border-2 border-muted" />
                                         )}
-                                        <span className={pattern.coeApproved ? "text-green-600" : ""}>
-                                            COE
+                                        <span className={pattern.status === "APPROVED" ? "text-green-600" : ""}>
+                                            Approved
                                         </span>
                                     </div>
                                 </div>
@@ -360,7 +358,7 @@ export default function ApprovePatterns() {
                         <DialogTitle>Approve Pattern</DialogTitle>
                         <DialogDescription>
                             Are you sure you want to approve this pattern? It will be forwarded
-                            to the next level of approval.
+                            to the next stage. Program Coordinator approval finalizes pattern approval.
                         </DialogDescription>
                     </DialogHeader>
                     <DialogFooter>

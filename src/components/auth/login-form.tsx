@@ -67,11 +67,12 @@ export const LoginForm = () => {
 
             if (result.user) {
                 setSuccess("Login successful! Redirecting...");
-                
+
                 // Get user role and redirect to appropriate dashboard
                 const userRole = result.user.role as UserRole | undefined;
                 if (userRole) {
-                    const dashboardRoute = getDashboardRoute(userRole);
+                    const normalizedRole = String(userRole).trim().toUpperCase();
+                    const dashboardRoute = getDashboardRoute(normalizedRole as UserRole);
                     router.push(dashboardRoute);
                 } else {
                     router.push("/dashboard");

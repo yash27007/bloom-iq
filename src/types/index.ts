@@ -2,7 +2,8 @@ export type Role =
   | "COURSE_COORDINATOR"
   | "MODULE_COORDINATOR"
   | "PROGRAM_COORDINATOR"
-  | "CONTROLLER_OF_EXAMINATION"
+  | "HOD"
+  | "DEAN"
   | "ADMIN";
 
 export type Designation =

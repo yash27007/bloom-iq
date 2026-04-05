@@ -38,7 +38,10 @@ const isAnyCoordinator = t.middleware(({ ctx, next }) => {
   if (
     role !== "COURSE_COORDINATOR" &&
     role !== "MODULE_COORDINATOR" &&
-    role !== "PROGRAM_COORDINATOR"
+    role !== "PROGRAM_COORDINATOR" &&
+    role !== "HOD" &&
+    role !== "DEAN" &&
+    role !== "CONTROLLER_OF_EXAMINATION"
   ) {
     throw new TRPCError({ message: "NOT AUTHORIZED", code: "UNAUTHORIZED" });
   }
@@ -63,8 +66,32 @@ const isProgramCoordinator = t.middleware(({ ctx, next }) => {
   }
   return next();
 });
-const isCOE = t.middleware(({ ctx, next }) => {
+const isHOD = t.middleware(({ ctx, next }) => {
+  if (ctx.session?.user?.role !== "HOD") {
+    throw new TRPCError({ message: "NOT AUTHORIZED", code: "UNAUTHORIZED" });
+  }
+  return next();
+});
+const isDean = t.middleware(({ ctx, next }) => {
+  if (ctx.session?.user?.role !== "DEAN") {
+    throw new TRPCError({ message: "NOT AUTHORIZED", code: "UNAUTHORIZED" });
+  }
+  return next();
+});
+const isControllerOfExamination = t.middleware(({ ctx, next }) => {
   if (ctx.session?.user?.role !== "CONTROLLER_OF_EXAMINATION") {
+    throw new TRPCError({ message: "NOT AUTHORIZED", code: "UNAUTHORIZED" });
+  }
+  return next();
+});
+
+const isPaperCommittee = t.middleware(({ ctx, next }) => {
+  const role = ctx.session?.user?.role;
+  if (
+    role !== "HOD" &&
+    role !== "DEAN" &&
+    role !== "CONTROLLER_OF_EXAMINATION"
+  ) {
     throw new TRPCError({ message: "NOT AUTHORIZED", code: "UNAUTHORIZED" });
   }
   return next();
@@ -82,16 +109,30 @@ export const protectedProcedure = t.procedure.use(isAuthed);
 export const adminProcedure = t.procedure.use(isAuthed).use(isAdmin);
 
 // Allow any coordinator role to access coordinator dashboard and shared features
-export const coordinatorProcedure = t.procedure.use(isAuthed).use(isAnyCoordinator);
+export const coordinatorProcedure = t.procedure
+  .use(isAuthed)
+  .use(isAnyCoordinator);
 
 // Specific coordinator role procedures for role-specific operations
-export const courseCoordinatorProcedure = t.procedure.use(isAuthed).use(isCourseCoordinator);
-export const moduleCoordinatorProcedure = t.procedure.use(isAuthed).use(isModuleCoordinator);
-export const programCoordinatorProcedure = t.procedure.use(isAuthed).use(isProgramCoordinator);
-
-export const questionReviewer = t.procedure
+export const courseCoordinatorProcedure = t.procedure
   .use(isAuthed)
-  .use(isModuleCoordinator)
-  .use(isProgramCoordinator)
-  .use(isCOE);
-export const controllerOfExamination = t.procedure.use(isAuthed).use(isCOE);
+  .use(isCourseCoordinator);
+export const moduleCoordinatorProcedure = t.procedure
+  .use(isAuthed)
+  .use(isModuleCoordinator);
+export const programCoordinatorProcedure = t.procedure
+  .use(isAuthed)
+  .use(isProgramCoordinator);
+export const hodProcedure = t.procedure.use(isAuthed).use(isHOD);
+export const deanProcedure = t.procedure.use(isAuthed).use(isDean);
+export const coeProcedure = t.procedure
+  .use(isAuthed)
+  .use(isControllerOfExamination);
+export const paperCommitteeProcedure = t.procedure
+  .use(isAuthed)
+  .use(isPaperCommittee);
+
+export const questionReviewer = t.procedure.use(isAuthed).use(isAnyCoordinator);
+export const controllerOfExamination = t.procedure
+  .use(isAuthed)
+  .use(isControllerOfExamination);

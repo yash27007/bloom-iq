@@ -1,8 +1,41 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Users, UserCheck, UserX, Settings } from "lucide-react";
+import {
+    Users,
+    UserCheck,
+    UserX,
+    Settings,
+    Building2,
+    BookOpen,
+    FileCheck2,
+    FileText,
+} from "lucide-react";
+import Link from "next/link";
+import { prisma } from "@/lib/prisma";
 
-export default function AdminDashboardPage() {
+export default async function AdminDashboardPage() {
+    const [
+        totalUsers,
+        activeUsers,
+        totalDepartments,
+        totalCourses,
+        patternsAwaitingMc,
+        patternsAwaitingPc,
+        generatedPapers,
+        finalizedPapers,
+    ] = await Promise.all([
+        prisma.user.count(),
+        prisma.user.count({ where: { isActive: true } }),
+        prisma.department.count(),
+        prisma.course.count(),
+        prisma.questionPaperPattern.count({ where: { status: "PENDING_MC_APPROVAL" } }),
+        prisma.questionPaperPattern.count({ where: { status: "PENDING_PC_APPROVAL" } }),
+        prisma.questionPaper.count(),
+        prisma.questionPaper.count({ where: { isFinalized: true } }),
+    ]);
+
+    const inactiveUsers = totalUsers - activeUsers;
+
     return (
         <div className="bg-background">
             <div className="container mx-auto px-6 py-8">
@@ -23,10 +56,8 @@ export default function AdminDashboardPage() {
                             <Users className="h-4 w-4 text-muted-foreground" />
                         </CardHeader>
                         <CardContent>
-                            <div className="text-2xl font-bold">1,234</div>
-                            <p className="text-xs text-muted-foreground">
-                                +10% from last month
-                            </p>
+                            <div className="text-2xl font-bold">{totalUsers}</div>
+                            <p className="text-xs text-muted-foreground">All registered users</p>
                         </CardContent>
                     </Card>
 
@@ -36,9 +67,9 @@ export default function AdminDashboardPage() {
                             <UserCheck className="h-4 w-4 text-muted-foreground" />
                         </CardHeader>
                         <CardContent>
-                            <div className="text-2xl font-bold">1,180</div>
+                            <div className="text-2xl font-bold">{activeUsers}</div>
                             <p className="text-xs text-muted-foreground">
-                                95.6% of total users
+                                {totalUsers > 0 ? `${((activeUsers / totalUsers) * 100).toFixed(1)}% of total users` : "No users yet"}
                             </p>
                         </CardContent>
                     </Card>
@@ -49,9 +80,9 @@ export default function AdminDashboardPage() {
                             <UserX className="h-4 w-4 text-muted-foreground" />
                         </CardHeader>
                         <CardContent>
-                            <div className="text-2xl font-bold">54</div>
+                            <div className="text-2xl font-bold">{inactiveUsers}</div>
                             <p className="text-xs text-muted-foreground">
-                                4.4% of total users
+                                {totalUsers > 0 ? `${((inactiveUsers / totalUsers) * 100).toFixed(1)}% of total users` : "No users yet"}
                             </p>
                         </CardContent>
                     </Card>
@@ -68,7 +99,7 @@ export default function AdminDashboardPage() {
                                 </Badge>
                             </div>
                             <p className="text-xs text-muted-foreground mt-2">
-                                All systems running
+                                Users, patterns, and paper services running
                             </p>
                         </CardContent>
                     </Card>
@@ -80,47 +111,71 @@ export default function AdminDashboardPage() {
                         <CardHeader>
                             <CardTitle>Quick Actions</CardTitle>
                         </CardHeader>
-                        <CardContent className="space-y-4">
+                        <CardContent className="space-y-3">
                             <div className="rounded-lg bg-muted/50 p-4">
                                 <h3 className="font-medium mb-2">User Management</h3>
                                 <p className="text-sm text-muted-foreground mb-3">
                                     Manage user accounts, roles, and permissions
                                 </p>
-                                <a
-                                    href="/admin/dashboard/users-management"
-                                    className="inline-flex items-center text-sm font-medium text-primary hover:underline"
-                                >
+                                <Link href="/admin/dashboard/users-management" className="inline-flex items-center text-sm font-medium text-primary hover:underline">
                                     Go to User Management →
-                                </a>
+                                </Link>
+                            </div>
+
+                            <div className="rounded-lg bg-muted/50 p-4">
+                                <h3 className="font-medium mb-2">Department Management</h3>
+                                <p className="text-sm text-muted-foreground mb-3">
+                                    Manage departments and assign HoD/Dean ownership
+                                </p>
+                                <Link href="/admin/dashboard/departments-management" className="inline-flex items-center text-sm font-medium text-primary hover:underline">
+                                    Go to Department Management →
+                                </Link>
+                            </div>
+
+                            <div className="rounded-lg bg-muted/50 p-4">
+                                <h3 className="font-medium mb-2">Course Management</h3>
+                                <p className="text-sm text-muted-foreground mb-3">
+                                    Configure courses and coordinator assignments
+                                </p>
+                                <Link href="/admin/dashboard/courses-management" className="inline-flex items-center text-sm font-medium text-primary hover:underline">
+                                    Go to Course Management →
+                                </Link>
                             </div>
                         </CardContent>
                     </Card>
 
                     <Card>
                         <CardHeader>
-                            <CardTitle>Recent Activity</CardTitle>
+                            <CardTitle>Operational Snapshot</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            <div className="space-y-4">
+                            <div className="space-y-3">
                                 <div className="flex items-start space-x-3">
-                                    <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
+                                    <Building2 className="h-4 w-4 mt-0.5 text-muted-foreground" />
                                     <div className="space-y-1">
-                                        <p className="text-sm font-medium">New user registered</p>
-                                        <p className="text-xs text-muted-foreground">2 minutes ago</p>
+                                        <p className="text-sm font-medium">Departments</p>
+                                        <p className="text-xs text-muted-foreground">{totalDepartments} configured departments</p>
                                     </div>
                                 </div>
                                 <div className="flex items-start space-x-3">
-                                    <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
+                                    <BookOpen className="h-4 w-4 mt-0.5 text-muted-foreground" />
                                     <div className="space-y-1">
-                                        <p className="text-sm font-medium">System backup completed</p>
-                                        <p className="text-xs text-muted-foreground">1 hour ago</p>
+                                        <p className="text-sm font-medium">Courses</p>
+                                        <p className="text-xs text-muted-foreground">{totalCourses} active courses in catalog</p>
                                     </div>
                                 </div>
                                 <div className="flex items-start space-x-3">
-                                    <div className="w-2 h-2 bg-orange-500 rounded-full mt-2"></div>
+                                    <FileCheck2 className="h-4 w-4 mt-0.5 text-muted-foreground" />
                                     <div className="space-y-1">
-                                        <p className="text-sm font-medium">User role updated</p>
-                                        <p className="text-xs text-muted-foreground">3 hours ago</p>
+                                        <p className="text-sm font-medium">Pending Pattern Approvals</p>
+                                        <p className="text-xs text-muted-foreground">MC: {patternsAwaitingMc} | PC: {patternsAwaitingPc}</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-start space-x-3">
+                                    <FileText className="h-4 w-4 mt-0.5 text-muted-foreground" />
+                                    <div className="space-y-1">
+                                        <p className="text-sm font-medium">Generated Papers</p>
+                                        <p className="text-xs text-muted-foreground">{generatedPapers} total | {finalizedPapers} finalized</p>
                                     </div>
                                 </div>
                             </div>

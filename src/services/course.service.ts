@@ -10,8 +10,8 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { PrismaClientKnownRequestError } from "@/generated/prisma/runtime/library";
-import type { Prisma, Role } from "@/generated/prisma";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/client";
+import type { Prisma, Role } from "@/generated/prisma/client";
 import { paginate, safeOrderBy } from "@/validators/common.validators";
 import {
   courseSortableKeys,
@@ -120,7 +120,7 @@ export class CourseService {
       }
       if (user.role !== "COURSE_COORDINATOR") {
         throw new Error(
-          "Selected course coordinator must have COURSE_COORDINATOR role."
+          "Selected course coordinator must have COURSE_COORDINATOR role.",
         );
       }
       if (!user.isActive) {
@@ -139,7 +139,7 @@ export class CourseService {
       }
       if (user.role !== "MODULE_COORDINATOR") {
         throw new Error(
-          "Selected module coordinator must have MODULE_COORDINATOR role."
+          "Selected module coordinator must have MODULE_COORDINATOR role.",
         );
       }
       if (!user.isActive) {
@@ -158,7 +158,7 @@ export class CourseService {
       }
       if (user.role !== "PROGRAM_COORDINATOR") {
         throw new Error(
-          "Selected program coordinator must have PROGRAM_COORDINATOR role."
+          "Selected program coordinator must have PROGRAM_COORDINATOR role.",
         );
       }
       if (!user.isActive) {
@@ -171,7 +171,7 @@ export class CourseService {
    * Create a new course
    */
   static async createCourse(
-    input: CreateCourseInput
+    input: CreateCourseInput,
   ): Promise<ServiceResult<CourseResponse>> {
     // Validate coordinator roles
     await this.validateCoordinatorRoles(input);
@@ -248,7 +248,7 @@ export class CourseService {
    * List courses with pagination, search, and filtering
    */
   static async listCourses(
-    input: ListCoursesInput
+    input: ListCoursesInput,
   ): Promise<ServiceResult<CourseResponse[]>> {
     const { page, limit, search, sortBy, sortOrder } = input;
     const { skip, take } = paginate(page, limit);
@@ -354,7 +354,7 @@ export class CourseService {
    * Get course by ID with full details
    */
   static async getCourseById(
-    id: string
+    id: string,
   ): Promise<ServiceResult<CourseResponse>> {
     const course = await prisma.course.findUnique({
       where: { id },
@@ -417,7 +417,7 @@ export class CourseService {
    * Update course details
    */
   static async updateCourse(
-    input: UpdateCourseInput
+    input: UpdateCourseInput,
   ): Promise<ServiceResult<CourseResponse>> {
     const { id, ...rest } = input;
 
@@ -551,7 +551,7 @@ export class CourseService {
    */
   static async getEligibleCoordinators(
     role: Role,
-    excludeCourseId?: string
+    excludeCourseId?: string,
   ): Promise<ServiceResult<EligibleCoordinator[]>> {
     // Find all active users with the specified role
     const eligibleUsers = await prisma.user.findMany({
@@ -594,7 +594,7 @@ export class CourseService {
 
     // Filter out assigned users
     const available = eligibleUsers.filter(
-      (user) => !assignedUserIds.has(user.id)
+      (user) => !assignedUserIds.has(user.id),
     );
 
     return { data: available };

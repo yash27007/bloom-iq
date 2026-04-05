@@ -32,6 +32,7 @@ interface Coordinator {
     email: string;
     facultyId: string;
     role: string;
+    departmentId: string | null;
 }
 
 interface CoordinatorsData {
@@ -40,12 +41,19 @@ interface CoordinatorsData {
     programCoordinators: Coordinator[];
 }
 
+interface DepartmentOption {
+    id: string;
+    code: string;
+    name: string;
+}
+
 interface CoursesManagementClientProps {
     initialData: ClientCourse[];
     coordinators: CoordinatorsData;
+    departments: DepartmentOption[];
 }
 
-export function CoursesManagementClient({ initialData, coordinators }: CoursesManagementClientProps) {
+export function CoursesManagementClient({ initialData, coordinators, departments }: CoursesManagementClientProps) {
     const [selectedCourse, setSelectedCourse] = useState<ClientCourse | null>(null);
     const [editDialogOpen, setEditDialogOpen] = useState(false);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -59,6 +67,7 @@ export function CoursesManagementClient({ initialData, coordinators }: CoursesMa
         courseCode: string;
         courseName: string;
         description?: string;
+        departmentId: string;
         courseCoordinatorId: string;
         moduleCoordinatorId: string;
         programCoordinatorId: string;
@@ -81,6 +90,7 @@ export function CoursesManagementClient({ initialData, coordinators }: CoursesMa
         courseCode?: string;
         courseName?: string;
         description?: string;
+        departmentId?: string;
         courseCoordinatorId?: string;
         moduleCoordinatorId?: string;
         programCoordinatorId?: string;
@@ -151,6 +161,23 @@ export function CoursesManagementClient({ initialData, coordinators }: CoursesMa
                     {row.getValue("name")}
                 </div>
             ),
+        },
+        {
+            id: "department",
+            header: "Department",
+            cell: ({ row }) => {
+                const department = row.original.department;
+                if (!department) {
+                    return <span className="text-xs text-muted-foreground italic">Not assigned</span>;
+                }
+
+                return (
+                    <div className="flex flex-col gap-0.5">
+                        <div className="text-sm font-medium">{department.name}</div>
+                        <div className="text-xs text-muted-foreground">{department.code}</div>
+                    </div>
+                );
+            },
         },
         {
             id: "courseCoordinator",
@@ -281,6 +308,7 @@ export function CoursesManagementClient({ initialData, coordinators }: CoursesMa
                         <AddCourseSheet
                             onSubmit={handleAddCourse}
                             coordinators={coordinators}
+                            departments={departments}
                         >
                             <Button>
                                 <Plus className="mr-2 h-4 w-4" />
@@ -295,6 +323,7 @@ export function CoursesManagementClient({ initialData, coordinators }: CoursesMa
             <AddCourseSheet
                 onSubmit={handleAddCourse}
                 coordinators={coordinators}
+                departments={departments}
             >
                 <button id="add-course-trigger" className="hidden" />
             </AddCourseSheet>
@@ -307,6 +336,7 @@ export function CoursesManagementClient({ initialData, coordinators }: CoursesMa
                         onClose={() => setEditDialogOpen(false)}
                         onSubmit={handleUpdateCourse}
                         coordinators={coordinators}
+                        departments={departments}
                     />
                     <DeleteCourseDialog
                         course={selectedCourse}

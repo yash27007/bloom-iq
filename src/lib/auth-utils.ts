@@ -2,34 +2,45 @@
  * Utility functions for role-based authentication and routing
  */
 
-export type UserRole = 
+export type UserRole =
   | "ADMIN"
   | "COURSE_COORDINATOR"
-  | "MODULE_COORDINATOR" 
+  | "MODULE_COORDINATOR"
   | "PROGRAM_COORDINATOR"
+  | "HOD"
+  | "DEAN"
   | "CONTROLLER_OF_EXAMINATION";
 
 export const coordinatorRoles: UserRole[] = [
   "COURSE_COORDINATOR",
   "MODULE_COORDINATOR",
   "PROGRAM_COORDINATOR",
-  "CONTROLLER_OF_EXAMINATION",
+  "HOD",
+  "DEAN",
 ];
+
+export const coeRoles: UserRole[] = ["CONTROLLER_OF_EXAMINATION"];
 
 /**
  * Get the appropriate dashboard route for a user based on their role
  */
 export function getDashboardRoute(role: UserRole): string {
-  if (role === "ADMIN") {
-    return "/admin/dashboard";
+  const normalizedRole = String(role).trim().toUpperCase() as UserRole;
+
+  switch (normalizedRole) {
+    case "ADMIN":
+      return "/admin/dashboard";
+    case "CONTROLLER_OF_EXAMINATION":
+    case "HOD":
+    case "DEAN":
+      return "/coe/dashboard";
+    case "COURSE_COORDINATOR":
+    case "MODULE_COORDINATOR":
+    case "PROGRAM_COORDINATOR":
+      return "/coordinator/dashboard";
+    default:
+      return "/dashboard";
   }
-  
-  if (coordinatorRoles.includes(role)) {
-    return "/coordinator/dashboard";
-  }
-  
-  // Fallback to general dashboard
-  return "/dashboard";
 }
 
 /**
@@ -59,6 +70,10 @@ export function getRoleDisplayName(role: UserRole): string {
       return "Module Coordinator";
     case "PROGRAM_COORDINATOR":
       return "Program Coordinator";
+    case "HOD":
+      return "Head of Department";
+    case "DEAN":
+      return "Dean";
     case "CONTROLLER_OF_EXAMINATION":
       return "Controller of Examination";
     default:
@@ -79,9 +94,22 @@ export function getRoleColorClass(role: UserRole): string {
       return "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200";
     case "PROGRAM_COORDINATOR":
       return "bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200";
+    case "HOD":
+      return "bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200";
+    case "DEAN":
+      return "bg-cyan-100 dark:bg-cyan-900 text-cyan-800 dark:text-cyan-200";
     case "CONTROLLER_OF_EXAMINATION":
       return "bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200";
     default:
       return "bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200";
   }
+}
+
+/**
+ * Check if a user role can access COE routes
+ */
+export function canAccessCoeRoutes(role: UserRole): boolean {
+  return (
+    role === "CONTROLLER_OF_EXAMINATION" || role === "HOD" || role === "DEAN"
+  );
 }

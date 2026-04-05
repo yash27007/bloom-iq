@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Fragment, useState, useEffect, useRef } from "react";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,9 +21,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Plus, Trash2, X } from "lucide-react";
+import { Loader2, Plus, Printer, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { openProfessionalPrintWindow } from "@/lib/print-utils";
 import type {
   PartAQuestionSlot,
   PartBQuestionGroup,
@@ -45,23 +46,115 @@ const BLOOM_LEVELS: BloomLevel[] = [
 
 const UNITS = [1, 2, 3, 4, 5];
 
+const BLOOM_LABELS: Record<BloomLevel, string> = {
+  REMEMBER: "Remember",
+  UNDERSTAND: "Understand",
+  APPLY: "Apply",
+  ANALYZE: "Analyze",
+  EVALUATE: "Evaluate",
+  CREATE: "Create",
+};
+
+const FALLBACK_DEPARTMENT = "Department of Computer Science and Engineering";
+const HEADER_META_PREFIX = "[[BLOOMIQ_HEADER_META]]";
+
+function encodeInstructionsWithMeta(
+  instructions: string,
+  degreeYearSem: string,
+  dateSession: string
+) {
+  const payload = {
+    degreeYearSem: degreeYearSem.trim(),
+    dateSession: dateSession.trim(),
+    instructions: instructions.trim(),
+  };
+
+  return `${HEADER_META_PREFIX}${JSON.stringify(payload)}`;
+}
+
+function decodeInstructionsWithMeta(raw?: string | null) {
+  if (!raw) {
+    return {
+      degreeYearSem: "",
+      dateSession: "",
+      instructions: "",
+    };
+  }
+
+  if (!raw.startsWith(HEADER_META_PREFIX)) {
+    return {
+      degreeYearSem: "",
+      dateSession: "",
+      instructions: raw,
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(raw.slice(HEADER_META_PREFIX.length)) as {
+      degreeYearSem?: string;
+      dateSession?: string;
+      instructions?: string;
+    };
+
+    return {
+      degreeYearSem: parsed.degreeYearSem || "",
+      dateSession: parsed.dateSession || "",
+      instructions: parsed.instructions || "",
+    };
+  } catch {
+    return {
+      degreeYearSem: "",
+      dateSession: "",
+      instructions: raw,
+    };
+  }
+}
+
 export default function CreatePatternPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const previewRef = useRef<HTMLDivElement>(null);
+  const isHydratingPatternRef = useRef(false);
+  const patternId = searchParams.get("patternId");
+  const isEditMode = Boolean(patternId);
   const [selectedCourseId, setSelectedCourseId] = useState("");
   const [patternName, setPatternName] = useState("");
   const [academicYear, setAcademicYear] = useState("2024-2025");
   const [semesterType, setSemesterType] = useState<SemesterType>("ODD");
   const [examType, setExamType] = useState<ExamType>("END_SEMESTER");
   const [duration, setDuration] = useState(180);
+  const [degreeYearSem, setDegreeYearSem] = useState("B.Tech. / I / ODD");
+  const [dateSession, setDateSession] = useState("To be set during paper generation");
   const [instructions, setInstructions] = useState("");
 
   // Part A and Part B structures
   const [partA, setPartA] = useState<PartAQuestionSlot[]>([]);
   const [partB, setPartB] = useState<PartBQuestionGroup[]>([]);
 
+  const handlePrintPreview = () => {
+    if (!previewRef.current) {
+      toast.error("Preview is not ready for printing.");
+      return;
+    }
+
+    const result = openProfessionalPrintWindow({
+      title: "Question Paper Pattern Preview",
+      html: previewRef.current.innerHTML,
+    });
+
+    if (!result.ok) {
+      toast.error(result.error);
+    }
+  };
+
   // Get user's courses
   const { data: coursesData } = trpc.coordinator.getCoursesForMaterialUpload.useQuery();
   const courses = coursesData || [];
+
+  const { data: editingPattern, isLoading: isLoadingPattern } = trpc.pattern.getPatternById.useQuery(
+    { id: patternId || "" },
+    { enabled: isEditMode && Boolean(patternId) }
+  );
 
   // Set default course if available
   useEffect(() => {
@@ -72,6 +165,10 @@ export default function CreatePatternPage() {
 
   // Initialize Part A when exam type changes
   useEffect(() => {
+    if (isHydratingPatternRef.current) {
+      return;
+    }
+
     const count = examType === "END_SEMESTER" ? 10 : 5;
     const newPartA: PartAQuestionSlot[] = [];
     for (let i = 1; i <= count; i++) {
@@ -87,6 +184,10 @@ export default function CreatePatternPage() {
 
   // Initialize Part B when exam type changes
   useEffect(() => {
+    if (isHydratingPatternRef.current) {
+      return;
+    }
+
     const isEndSem = examType === "END_SEMESTER";
     const count = isEndSem ? 5 : 5; // 5 groups for both
     const newPartB: PartBQuestionGroup[] = [];
@@ -140,6 +241,30 @@ export default function CreatePatternPage() {
     setPartB(newPartB);
   }, [examType]);
 
+  useEffect(() => {
+    if (!isEditMode || !editingPattern) {
+      return;
+    }
+
+    isHydratingPatternRef.current = true;
+    setSelectedCourseId(editingPattern.courseId);
+    setPatternName(editingPattern.patternName);
+    setAcademicYear(editingPattern.academicYear);
+    setSemesterType(editingPattern.semesterType as SemesterType);
+    setExamType(editingPattern.examType as ExamType);
+    setDuration(editingPattern.duration);
+    const decoded = decodeInstructionsWithMeta(editingPattern.instructions);
+    setDegreeYearSem(decoded.degreeYearSem || "B.Tech. / I / ODD");
+    setDateSession(decoded.dateSession || "To be set during paper generation");
+    setInstructions(decoded.instructions);
+    setPartA((editingPattern.partAStructure as PartAQuestionSlot[]) || []);
+    setPartB((editingPattern.partBStructure as PartBQuestionGroup[]) || []);
+
+    setTimeout(() => {
+      isHydratingPatternRef.current = false;
+    }, 0);
+  }, [isEditMode, editingPattern]);
+
   // Calculate total marks
   const calculateMarks = () => {
     const partATotal = partA.reduce((sum, q) => sum + q.marks, 0);
@@ -157,6 +282,68 @@ export default function CreatePatternPage() {
   };
 
   const marks = calculateMarks();
+  const selectedCourse = courses.find((c: any) => c.id === selectedCourseId);
+  const selectedDepartmentName =
+    selectedCourse?.department?.name || FALLBACK_DEPARTMENT;
+
+  const assessmentRows = (() => {
+    const questions = [
+      ...partA.map((q) => ({
+        marks: q.marks,
+        bloomLevel: q.bloomLevel,
+        co: `CO${q.units[0] || 1}`,
+      })),
+      ...partB.flatMap((group) => {
+        if (group.hasOR && group.options) {
+          return group.options.map((option) => {
+            const slot = option.questionSlot;
+            return {
+              marks: slot.marks,
+              bloomLevel: slot.bloomLevel || "APPLY",
+              co: `CO${slot.units?.[0] || 1}`,
+            };
+          });
+        }
+
+        if (group.questionSlot) {
+          return [
+            {
+              marks: group.questionSlot.marks,
+              bloomLevel: group.questionSlot.bloomLevel || "APPLY",
+              co: `CO${group.questionSlot.units?.[0] || 1}`,
+            },
+          ];
+        }
+
+        return [];
+      }),
+    ];
+
+    const byCO: Record<string, Record<BloomLevel | "TOTAL", number>> = {};
+    for (const q of questions) {
+      if (!byCO[q.co]) {
+        byCO[q.co] = {
+          REMEMBER: 0,
+          UNDERSTAND: 0,
+          APPLY: 0,
+          ANALYZE: 0,
+          EVALUATE: 0,
+          CREATE: 0,
+          TOTAL: 0,
+        };
+      }
+
+      byCO[q.co][q.bloomLevel] += q.marks;
+      byCO[q.co].TOTAL += q.marks;
+    }
+
+    return Object.keys(byCO)
+      .sort()
+      .map((co) => ({
+        co,
+        ...byCO[co],
+      }));
+  })();
 
   // Create pattern mutation
   const createMutation = trpc.pattern.createPattern.useMutation({
@@ -167,6 +354,16 @@ export default function CreatePatternPage() {
     onError: (error: any) => {
       console.error("Validation errors:", error.data?.zodError?.fieldErrors);
       toast.error(error.message || "Failed to create pattern");
+    },
+  });
+
+  const updateMutation = trpc.pattern.updatePattern.useMutation({
+    onSuccess: () => {
+      toast.success("Pattern updated successfully and moved to MC approval");
+      router.push("/coordinator/dashboard/question-paper/patterns");
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Failed to update pattern");
     },
   });
 
@@ -184,7 +381,7 @@ export default function CreatePatternPage() {
       return;
     }
 
-    createMutation.mutate({
+    const payload = {
       courseId: selectedCourseId,
       patternName,
       academicYear,
@@ -194,8 +391,18 @@ export default function CreatePatternPage() {
       duration,
       partAStructure: partA,
       partBStructure: partB,
-      instructions: instructions || undefined,
-    });
+      instructions: encodeInstructionsWithMeta(instructions, degreeYearSem, dateSession),
+    };
+
+    if (isEditMode && patternId) {
+      updateMutation.mutate({
+        id: patternId,
+        ...payload,
+      });
+      return;
+    }
+
+    createMutation.mutate(payload);
   };
 
   // Update Part A question
@@ -400,11 +607,24 @@ export default function CreatePatternPage() {
     <div className="container mx-auto py-6 space-y-6 max-w-6xl">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold">Create Question Paper Pattern</h1>
+        <h1 className="text-3xl font-bold">
+          {isEditMode ? "Edit Question Paper Pattern" : "Create Question Paper Pattern"}
+        </h1>
         <p className="text-muted-foreground">
-          Define the structure and format of the examination paper
+          {isEditMode
+            ? "Modify the pattern structure and save changes"
+            : "Define the structure and format of the examination paper"}
         </p>
       </div>
+
+      {isEditMode && isLoadingPattern && (
+        <Card>
+          <CardContent className="py-8 flex items-center justify-center gap-2">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Loading pattern...
+          </CardContent>
+        </Card>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Basic Information */}
@@ -426,10 +646,14 @@ export default function CreatePatternPage() {
                     {courses.map((course: any) => (
                       <SelectItem key={course.id} value={course.id}>
                         {course.course_code} - {course.name}
+                        {course.department?.name ? ` (${course.department.name})` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Department: {selectedDepartmentName}
+                </p>
               </div>
 
               {/* Pattern Name */}
@@ -495,6 +719,28 @@ export default function CreatePatternPage() {
                   min="30"
                   value={duration}
                   onChange={(e) => setDuration(parseInt(e.target.value))}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="degreeYearSem">Degree / Year / Sem *</Label>
+                <Input
+                  id="degreeYearSem"
+                  value={degreeYearSem}
+                  onChange={(e) => setDegreeYearSem(e.target.value)}
+                  placeholder="e.g., B.Tech. / I / ODD"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dateSession">Date & Session *</Label>
+                <Input
+                  id="dateSession"
+                  value={dateSession}
+                  onChange={(e) => setDateSession(e.target.value)}
+                  placeholder="e.g., 24-04-2026 / FN"
                   required
                 />
               </div>
@@ -1088,6 +1334,190 @@ export default function CreatePatternPage() {
                 Total marks must be {examType === "END_SEMESTER" ? 100 : 50}!
               </p>
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <CardTitle>Institutional Format Preview</CardTitle>
+                <CardDescription>
+                  This preview matches the print style for question papers and pattern design.
+                </CardDescription>
+              </div>
+              <Button type="button" variant="outline" onClick={handlePrintPreview}>
+                <Printer className="mr-2 h-4 w-4" />
+                Print Preview
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm">
+            <div ref={previewRef} className="space-y-4">
+              <div className="text-center space-y-1">
+                <p className="font-bold uppercase">KALASALINGAM ACADEMY OF RESEARCH AND EDUCATION (Deemed to be University)</p>
+                <p className="font-semibold uppercase">{selectedDepartmentName}</p>
+                <p className="font-semibold">
+                  {examType === "SESSIONAL_1"
+                    ? "SESSIONAL EXAMINATION-I"
+                    : examType === "SESSIONAL_2"
+                      ? "SESSIONAL EXAMINATION-II"
+                      : "END SEMESTER EXAMINATION"}
+                </p>
+              </div>
+
+              <table className="w-full border border-border border-collapse">
+                <tbody>
+                  <tr>
+                    <td className="border border-border px-2 py-1 font-medium">Course Code</td>
+                    <td className="border border-border px-2 py-1">{selectedCourse?.course_code || "-"}</td>
+                    <td className="border border-border px-2 py-1 font-medium">Duration</td>
+                    <td className="border border-border px-2 py-1">{duration} Minutes</td>
+                  </tr>
+                  <tr>
+                    <td className="border border-border px-2 py-1 font-medium">Course Name</td>
+                    <td className="border border-border px-2 py-1">{selectedCourse?.name || "-"}</td>
+                    <td className="border border-border px-2 py-1 font-medium">Max. Marks</td>
+                    <td className="border border-border px-2 py-1">{marks.total}</td>
+                  </tr>
+                  <tr>
+                    <td className="border border-border px-2 py-1 font-medium">Degree / Year / Sem</td>
+                    <td className="border border-border px-2 py-1">{degreeYearSem}</td>
+                    <td className="border border-border px-2 py-1 font-medium">Date & Session</td>
+                    <td className="border border-border px-2 py-1">{dateSession}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div>
+                <h3 className="font-semibold">PART - A ({partA.length} × 2 = {partA.length * 2} Marks)</h3>
+                <table className="w-full border border-border border-collapse mt-2">
+                  <colgroup>
+                    <col style={{ width: "8%" }} />
+                    <col style={{ width: "64%" }} />
+                    <col style={{ width: "14%" }} />
+                    <col style={{ width: "8%" }} />
+                    <col style={{ width: "6%" }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th className="border border-border px-2 py-1 text-left">Question Number</th>
+                      <th className="border border-border px-2 py-1 text-left">Question Text</th>
+                      <th className="border border-border px-2 py-1 text-left">Pattern</th>
+                      <th className="border border-border px-2 py-1 text-left">Mapping COs</th>
+                      <th className="border border-border px-2 py-1 text-left">Marks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {partA.map((q) => (
+                      <tr key={`preview-parta-${q.questionNumber}`}>
+                        <td className="border border-border px-2 py-1">{q.questionNumber}</td>
+                        <td className="border border-border px-2 py-1">Configured from question bank</td>
+                        <td className="border border-border px-2 py-1">{BLOOM_LABELS[q.bloomLevel]}</td>
+                        <td className="border border-border px-2 py-1">CO{q.units[0] || 1}</td>
+                        <td className="border border-border px-2 py-1">{q.marks}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div>
+                <h3 className="font-semibold">PART - B</h3>
+                <table className="w-full border border-border border-collapse mt-2">
+                  <colgroup>
+                    <col style={{ width: "8%" }} />
+                    <col style={{ width: "64%" }} />
+                    <col style={{ width: "14%" }} />
+                    <col style={{ width: "8%" }} />
+                    <col style={{ width: "6%" }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th className="border border-border px-2 py-1 text-left">Question Number</th>
+                      <th className="border border-border px-2 py-1 text-left">Question Text</th>
+                      <th className="border border-border px-2 py-1 text-left">Pattern</th>
+                      <th className="border border-border px-2 py-1 text-left">Mapping COs</th>
+                      <th className="border border-border px-2 py-1 text-left">Marks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {partB.map((group) => {
+                      if (group.hasOR && group.options && group.options.length > 0) {
+                        return group.options.map((option, optionIndex) => {
+                          const slot = option.questionSlot;
+                          const showOrRow = optionIndex > 0;
+
+                          return (
+                            <Fragment key={`preview-partb-fragment-${group.groupNumber}-${option.optionLabel}-${optionIndex}`}>
+                              {showOrRow && (
+                                <tr key={`preview-partb-or-${group.groupNumber}-${optionIndex}`}>
+                                  <td colSpan={5} className="border border-border px-2 py-1 text-center font-semibold">
+                                    OR
+                                  </td>
+                                </tr>
+                              )}
+                              <tr key={`preview-partb-${group.groupNumber}-${option.optionLabel}`}>
+                                <td className="border border-border px-2 py-1">{group.groupNumber}{option.optionLabel}</td>
+                                <td className="border border-border px-2 py-1">Configured from question bank</td>
+                                <td className="border border-border px-2 py-1">{slot.bloomLevel ? BLOOM_LABELS[slot.bloomLevel] : "Apply"}</td>
+                                <td className="border border-border px-2 py-1">CO{slot.units?.[0] || 1}</td>
+                                <td className="border border-border px-2 py-1">{slot.marks}</td>
+                              </tr>
+                            </Fragment>
+                          );
+                        });
+                      }
+
+                      const slot = group.questionSlot;
+                      if (!slot) return null;
+
+                      return (
+                        <tr key={`preview-partb-${group.groupNumber}`}>
+                          <td className="border border-border px-2 py-1">{group.groupNumber}</td>
+                          <td className="border border-border px-2 py-1">Configured from question bank</td>
+                          <td className="border border-border px-2 py-1">{slot.bloomLevel ? BLOOM_LABELS[slot.bloomLevel] : "Apply"}</td>
+                          <td className="border border-border px-2 py-1">CO{slot.units?.[0] || 1}</td>
+                          <td className="border border-border px-2 py-1">{slot.marks}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div>
+                <h3 className="font-semibold">Assessment Pattern (Bloom&apos;s Taxonomy)</h3>
+                <table className="w-full border border-border border-collapse mt-2">
+                  <thead>
+                    <tr>
+                      <th className="border border-border px-2 py-1">COs</th>
+                      <th className="border border-border px-2 py-1">Remember</th>
+                      <th className="border border-border px-2 py-1">Understand</th>
+                      <th className="border border-border px-2 py-1">Apply</th>
+                      <th className="border border-border px-2 py-1">Analyze</th>
+                      <th className="border border-border px-2 py-1">Evaluate</th>
+                      <th className="border border-border px-2 py-1">Create</th>
+                      <th className="border border-border px-2 py-1">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {assessmentRows.map((row) => (
+                      <tr key={`matrix-${row.co}`}>
+                        <td className="border border-border px-2 py-1 font-medium">{row.co}</td>
+                        <td className="border border-border px-2 py-1 text-center">{row.REMEMBER}</td>
+                        <td className="border border-border px-2 py-1 text-center">{row.UNDERSTAND}</td>
+                        <td className="border border-border px-2 py-1 text-center">{row.APPLY}</td>
+                        <td className="border border-border px-2 py-1 text-center">{row.ANALYZE}</td>
+                        <td className="border border-border px-2 py-1 text-center">{row.EVALUATE}</td>
+                        <td className="border border-border px-2 py-1 text-center">{row.CREATE}</td>
+                        <td className="border border-border px-2 py-1 text-center font-semibold">{row.TOTAL}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </CardContent>
         </Card>
 

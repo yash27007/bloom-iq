@@ -2,7 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { coordinatorProcedure, createTRPCRouter } from "../init";
 import * as z from "zod";
 import { TRPCError } from "@trpc/server";
-import type { Prisma } from "@/generated/prisma";
+import type { Prisma } from "@/generated/prisma/client";
+import { generateAIText } from "@/services/ai";
 
 /**
  * Question Bank Router
@@ -48,9 +49,9 @@ export const questionBankRouter = createTRPCRouter({
           .enum(["createdAt", "updatedAt", "unit", "marks"])
           .default("createdAt"),
         sortOrder: z.enum(["asc", "desc"]).default("desc"),
-      })
+      }),
     )
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const {
         courseId,
         unit,
@@ -65,6 +66,41 @@ export const questionBankRouter = createTRPCRouter({
         sortBy,
         sortOrder,
       } = input;
+
+      if (!ctx.session?.user) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "Not authenticated",
+        });
+      }
+
+      const userId = ctx.session.user.id;
+      const role = ctx.session.user.role;
+
+      const accessibleCourse = await prisma.course.findFirst({
+        where:
+          role === "COURSE_COORDINATOR"
+            ? { id: courseId, courseCoordinatorId: userId }
+            : role === "MODULE_COORDINATOR"
+              ? { id: courseId, moduleCoordinatorId: userId }
+              : role === "PROGRAM_COORDINATOR"
+                ? { id: courseId, programCoordinatorId: userId }
+                : role === "HOD"
+                  ? { id: courseId, department: { hodId: userId } }
+                  : role === "DEAN"
+                    ? { id: courseId, department: { deanId: userId } }
+                    : role === "CONTROLLER_OF_EXAMINATION" || role === "ADMIN"
+                      ? { id: courseId }
+                      : { id: "__no_access__" },
+        select: { id: true },
+      });
+
+      if (!accessibleCourse) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You don't have access to this course question bank",
+        });
+      }
 
       // Build where clause dynamically
       const where: Prisma.QuestionWhereInput = {
@@ -193,7 +229,42 @@ export const questionBankRouter = createTRPCRouter({
    */
   getCourseUnits: coordinatorProcedure
     .input(z.object({ courseId: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      if (!ctx.session?.user) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "Not authenticated",
+        });
+      }
+
+      const userId = ctx.session.user.id;
+      const role = ctx.session.user.role;
+
+      const accessibleCourse = await prisma.course.findFirst({
+        where:
+          role === "COURSE_COORDINATOR"
+            ? { id: input.courseId, courseCoordinatorId: userId }
+            : role === "MODULE_COORDINATOR"
+              ? { id: input.courseId, moduleCoordinatorId: userId }
+              : role === "PROGRAM_COORDINATOR"
+                ? { id: input.courseId, programCoordinatorId: userId }
+                : role === "HOD"
+                  ? { id: input.courseId, department: { hodId: userId } }
+                  : role === "DEAN"
+                    ? { id: input.courseId, department: { deanId: userId } }
+                    : role === "CONTROLLER_OF_EXAMINATION" || role === "ADMIN"
+                      ? { id: input.courseId }
+                      : { id: "__no_access__" },
+        select: { id: true },
+      });
+
+      if (!accessibleCourse) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You don't have access to this course",
+        });
+      }
+
       const units = await prisma.question.findMany({
         where: { courseId: input.courseId },
         select: { unit: true },
@@ -230,7 +301,7 @@ export const questionBankRouter = createTRPCRouter({
           "PROBLEM_BASED",
         ]),
         unit: z.number(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       if (!ctx.session) {
@@ -270,6 +341,8 @@ export const questionBankRouter = createTRPCRouter({
         existingQuestion.course.courseCoordinatorId === userId ||
         existingQuestion.course.moduleCoordinatorId === userId ||
         existingQuestion.course.programCoordinatorId === userId ||
+        userRole === "HOD" ||
+        userRole === "DEAN" ||
         userRole === "CONTROLLER_OF_EXAMINATION" ||
         userRole === "ADMIN";
 
@@ -341,6 +414,8 @@ export const questionBankRouter = createTRPCRouter({
         existingQuestion.course.courseCoordinatorId === userId ||
         existingQuestion.course.moduleCoordinatorId === userId ||
         existingQuestion.course.programCoordinatorId === userId ||
+        userRole === "HOD" ||
+        userRole === "DEAN" ||
         userRole === "CONTROLLER_OF_EXAMINATION" ||
         userRole === "ADMIN";
 
@@ -359,6 +434,99 @@ export const questionBankRouter = createTRPCRouter({
       return {
         success: true,
         message: "Question deleted successfully",
+      };
+    }),
+
+  regenerateAnswer: coordinatorProcedure
+    .input(
+      z.object({
+        questionId: z.string(),
+        questionText: z
+          .string()
+          .min(10, "Question must be at least 10 characters"),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.session) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "Not authenticated",
+        });
+      }
+
+      const existingQuestion = await prisma.question.findUnique({
+        where: { id: input.questionId },
+        include: {
+          course: {
+            select: {
+              courseCoordinatorId: true,
+              moduleCoordinatorId: true,
+              programCoordinatorId: true,
+            },
+          },
+        },
+      });
+
+      if (!existingQuestion) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Question not found",
+        });
+      }
+
+      const userId = ctx.session.user.id;
+      const userRole = ctx.session.user.role;
+      const isAuthorized =
+        existingQuestion.course.courseCoordinatorId === userId ||
+        existingQuestion.course.moduleCoordinatorId === userId ||
+        existingQuestion.course.programCoordinatorId === userId ||
+        userRole === "HOD" ||
+        userRole === "DEAN" ||
+        userRole === "CONTROLLER_OF_EXAMINATION" ||
+        userRole === "ADMIN";
+
+      if (!isAuthorized) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            "You don't have permission to regenerate answer for this question",
+        });
+      }
+
+      const marksValue =
+        existingQuestion.marks === "TWO"
+          ? 2
+          : existingQuestion.marks === "EIGHT"
+            ? 8
+            : 16;
+
+      const prompt = `You are an expert university examiner. Generate a concise model answer.
+
+Question: ${input.questionText}
+Marks: ${marksValue}
+
+Requirements:
+- Provide key points suitable for evaluation.
+- Keep the answer concise but complete.
+- Include formulas/steps when relevant.
+- Do not include markdown headings.`;
+
+      const regeneratedAnswer = await generateAIText(prompt, {
+        temperature: 0.4,
+      });
+
+      const updatedQuestion = await prisma.question.update({
+        where: { id: input.questionId },
+        data: {
+          question: input.questionText,
+          answer: regeneratedAnswer,
+        },
+      });
+
+      return {
+        success: true,
+        answer: regeneratedAnswer,
+        question: updatedQuestion,
       };
     }),
 
@@ -439,7 +607,7 @@ export const questionBankRouter = createTRPCRouter({
           reviewedByPc: true,
           pcApprovedAt: new Date(),
         };
-      } else if (userRole === "CONTROLLER_OF_EXAMINATION") {
+      } else if (userRole === "DEAN") {
         if (
           !question.reviewedByCc ||
           !question.reviewedByMc ||
@@ -539,7 +707,7 @@ export const questionBankRouter = createTRPCRouter({
           question.course.programCoordinatorId === userId
         ) {
           isValid = question.reviewedByCc && question.reviewedByMc;
-        } else if (userRole === "CONTROLLER_OF_EXAMINATION") {
+        } else if (userRole === "DEAN") {
           isValid =
             question.reviewedByCc &&
             question.reviewedByMc &&
@@ -574,7 +742,7 @@ export const questionBankRouter = createTRPCRouter({
           reviewedByPc: true,
           pcApprovedAt: new Date(),
         };
-      } else if (userRole === "CONTROLLER_OF_EXAMINATION") {
+      } else if (userRole === "DEAN") {
         updateData = {
           isFinalized: true,
         };
@@ -598,8 +766,43 @@ export const questionBankRouter = createTRPCRouter({
    */
   getQuestionStats: coordinatorProcedure
     .input(z.object({ courseId: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const { courseId } = input;
+
+      if (!ctx.session?.user) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "Not authenticated",
+        });
+      }
+
+      const userId = ctx.session.user.id;
+      const role = ctx.session.user.role;
+
+      const accessibleCourse = await prisma.course.findFirst({
+        where:
+          role === "COURSE_COORDINATOR"
+            ? { id: courseId, courseCoordinatorId: userId }
+            : role === "MODULE_COORDINATOR"
+              ? { id: courseId, moduleCoordinatorId: userId }
+              : role === "PROGRAM_COORDINATOR"
+                ? { id: courseId, programCoordinatorId: userId }
+                : role === "HOD"
+                  ? { id: courseId, department: { hodId: userId } }
+                  : role === "DEAN"
+                    ? { id: courseId, department: { deanId: userId } }
+                    : role === "CONTROLLER_OF_EXAMINATION" || role === "ADMIN"
+                      ? { id: courseId }
+                      : { id: "__no_access__" },
+        select: { id: true },
+      });
+
+      if (!accessibleCourse) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You don't have access to this course",
+        });
+      }
 
       // Get total counts
       const totalQuestions = await prisma.question.count({

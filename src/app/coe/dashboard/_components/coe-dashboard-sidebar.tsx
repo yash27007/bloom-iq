@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/tooltip";
 import { logout } from "@/actions/auth";
 
-// Navigation items for COE Dashboard
+// Navigation items for paper committee dashboard
 const navigationItems = {
     main: [
         {
@@ -47,11 +47,13 @@ const navigationItems = {
             title: "Generate Paper",
             url: "/coe/dashboard/generate-paper",
             icon: FaFilePen,
+            roles: ["HOD"],
         },
         {
             title: "View Papers",
             url: "/coe/dashboard/view-papers",
             icon: Eye,
+            roles: ["HOD", "DEAN", "CONTROLLER_OF_EXAMINATION"],
         },
     ],
 };
@@ -60,6 +62,7 @@ interface MenuItem {
     title: string;
     url: string;
     icon: React.ComponentType<{ className?: string }>;
+    roles?: string[];
 }
 
 interface CoeDashboardSidebarProps {
@@ -72,28 +75,47 @@ interface CoeDashboardSidebarProps {
     };
 }
 
+function getHomeUrl(role?: string): string {
+    void role;
+    return "/coe/dashboard";
+}
+
 export function CoeDashboardSidebar({ user }: CoeDashboardSidebarProps) {
     const { state } = useSidebar();
     const isCollapsed = state === "collapsed";
+    const homeUrl = getHomeUrl(user?.role);
+    const mainItems = [{ ...navigationItems.main[0], url: homeUrl }];
+
+    const visiblePaperManagement = navigationItems.paperManagement.filter((item) => {
+        if (!item.roles || item.roles.length === 0) return true;
+        return Boolean(user?.role && item.roles.includes(user.role));
+    });
 
     return (
         <Sidebar collapsible="icon">
-            <SidebarHeader>
-                <div className="flex items-center gap-2 px-4 py-4">
-                    <PanelLeftOpen className="h-6 w-6" />
-                    {!isCollapsed && (
-                        <span className="font-bold text-lg">COE Dashboard</span>
-                    )}
-                </div>
+            <SidebarHeader className="px-2 py-2">
+                {isCollapsed ? (
+                    <div className="flex justify-center">
+                        <SidebarTrigger />
+                    </div>
+                ) : (
+                    <div className="flex items-center justify-between gap-2 px-2">
+                        <Link href={homeUrl} className="flex min-w-0 items-center gap-2">
+                            <PanelLeftOpen className="h-5 w-5 shrink-0" />
+                            <span className="truncate font-bold text-base">Paper Committee</span>
+                        </Link>
+                        <SidebarTrigger className="shrink-0" />
+                    </div>
+                )}
             </SidebarHeader>
 
-            <SidebarContent>
+            <SidebarContent className="overflow-x-hidden">
                 {/* Main Navigation */}
                 <SidebarGroup>
                     <SidebarGroupLabel>Main</SidebarGroupLabel>
                     <SidebarGroupContent>
                         <SidebarMenu>
-                            {navigationItems.main.map((item: MenuItem) => (
+                            {mainItems.map((item: MenuItem) => (
                                 <SidebarMenuItem key={item.title}>
                                     <TooltipProvider delayDuration={0}>
                                         <Tooltip>
@@ -125,7 +147,7 @@ export function CoeDashboardSidebar({ user }: CoeDashboardSidebarProps) {
                     <SidebarGroupLabel>Paper Management</SidebarGroupLabel>
                     <SidebarGroupContent>
                         <SidebarMenu>
-                            {navigationItems.paperManagement.map((item: MenuItem) => (
+                            {visiblePaperManagement.map((item: MenuItem) => (
                                 <SidebarMenuItem key={item.title}>
                                     <TooltipProvider delayDuration={0}>
                                         <Tooltip>
@@ -156,10 +178,10 @@ export function CoeDashboardSidebar({ user }: CoeDashboardSidebarProps) {
                     {/* User Profile */}
                     {user && !isCollapsed && (
                         <SidebarMenuItem>
-                            <div className="px-4 py-3 text-sm">
-                                <p className="font-medium">{user.firstName} {user.lastName}</p>
-                                <p className="text-xs text-muted-foreground">{user.email}</p>
-                                <p className="text-xs text-muted-foreground capitalize">{user.role}</p>
+                            <div className="min-w-0 px-3 py-2 text-sm">
+                                <p className="truncate font-medium">{user.firstName} {user.lastName}</p>
+                                <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                                <p className="truncate text-xs text-muted-foreground capitalize">{user.role.replaceAll("_", " ")}</p>
                             </div>
                         </SidebarMenuItem>
                     )}
@@ -184,11 +206,6 @@ export function CoeDashboardSidebar({ user }: CoeDashboardSidebarProps) {
                                 )}
                             </Tooltip>
                         </TooltipProvider>
-                    </SidebarMenuItem>
-
-                    {/* Sidebar Toggle */}
-                    <SidebarMenuItem>
-                        <SidebarTrigger />
                     </SidebarMenuItem>
                 </SidebarMenu>
             </SidebarFooter>

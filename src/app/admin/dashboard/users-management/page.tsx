@@ -14,6 +14,7 @@ function transformToClientUser(user: {
     email: string;
     role: string;
     designation: string;
+    department?: { id: string; code: string; name: string } | null;
     isActive?: boolean;
     createdAt: Date;
     courseCoordinatorCourses?: Array<{ id: string; course_code: string; name: string }>;
@@ -28,6 +29,7 @@ function transformToClientUser(user: {
         email: user.email,
         role: user.role,
         designation: user.designation,
+        department: user.department || null,
         isActive: user.isActive ?? true,
         createdAt: user.createdAt,
         courseCoordinatorCourses: user.courseCoordinatorCourses || [],
@@ -39,10 +41,23 @@ function transformToClientUser(user: {
 export default async function UsersManagement() {
     try {
         const caller = await createCaller();
-        const response = await caller.admin.getUsers({
-            page: 1,
-            limit: 100, // Safe limit to avoid validation error
-        });
+        const [response, departmentsResponse] = await Promise.all([
+            caller.admin.getUsers({
+                page: 1,
+                limit: 100, // Safe limit to avoid validation error
+            }),
+            caller.admin.getDepartments(),
+        ]);
+
+        const departments = departmentsResponse.data?.map((department) => ({
+            id: department.id,
+            code: department.code,
+            name: department.name,
+            description: department.description,
+            hod: department.hod,
+            dean: department.dean,
+            _count: department._count,
+        })) || [];
 
         if (response.data && response.data.length > 0) {
             const users = response.data.map(transformToClientUser);
@@ -50,12 +65,14 @@ export default async function UsersManagement() {
                 total: users.length,
                 firstUser: users[0],
             });
-            return <UsersManagementClient initialData={users} />;
+            return <UsersManagementClient initialData={users} departments={departments} />;
         }
+
+        return <UsersManagementClient initialData={[]} departments={departments} />;
     } catch (error) {
         console.error("Error loading users:", error);
 
         // Return empty state if data loading fails
-        return <UsersManagementClient initialData={[]} />;
+        return <UsersManagementClient initialData={[]} departments={[]} />;
     }
 }

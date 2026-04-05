@@ -3,15 +3,15 @@
  */
 
 import { z } from "zod";
-import { ExamType, SemesterType } from "@/generated/prisma";
+import { ExamType, SemesterType } from "@/generated/prisma/client";
 
 export const examTypeArray = Object.values(ExamType) as [
   ExamType,
-  ...ExamType[]
+  ...ExamType[],
 ];
 export const semesterTypeArray = Object.values(SemesterType) as [
   SemesterType,
-  ...SemesterType[]
+  ...SemesterType[],
 ];
 
 const bloomLevelEnum = z.enum([
@@ -132,14 +132,14 @@ export const createPatternSchema = z
       message:
         "Total marks must match exam type (50 for Sessional, 100 for End Semester)",
       path: ["totalMarks"],
-    }
+    },
   )
   .refine(
     (data) => {
       // Calculate Part A total
       const partATotal = data.partAStructure.reduce(
         (sum, q) => sum + q.marks,
-        0
+        0,
       );
 
       if (data.examType === "END_SEMESTER") {
@@ -151,7 +151,7 @@ export const createPatternSchema = z
     {
       message: "Part A must be 20 marks (End Sem) or 10 marks (Sessional)",
       path: ["partAStructure"],
-    }
+    },
   )
   .refine(
     (data) => {
@@ -175,7 +175,7 @@ export const createPatternSchema = z
     {
       message: "Part B must be 80 marks (End Sem) or 40 marks (Sessional)",
       path: ["partBStructure"],
-    }
+    },
   )
   .refine(
     (data) => {
@@ -183,12 +183,12 @@ export const createPatternSchema = z
       if (data.examType === "END_SEMESTER") {
         // All Part B groups must have OR options
         return data.partBStructure.every(
-          (group) => group.hasOR && group.options && group.options.length >= 2
+          (group) => group.hasOR && group.options && group.options.length >= 2,
         );
       } else {
         // Sessional exams should NOT have OR options
         return data.partBStructure.every(
-          (group) => !group.hasOR && group.questionSlot
+          (group) => !group.hasOR && group.questionSlot,
         );
       }
     },
@@ -196,7 +196,7 @@ export const createPatternSchema = z
       message:
         "End Semester must have OR options; Sessional must not have OR options",
       path: ["partBStructure"],
-    }
+    },
   );
 
 /**
@@ -204,10 +204,20 @@ export const createPatternSchema = z
  */
 export const updatePatternSchema = z.object({
   id: z.string().uuid("Invalid pattern ID"),
+  courseId: z.string().uuid("Invalid course ID").optional(),
   patternName: z.string().min(3).optional(),
   academicYear: z
     .string()
     .regex(/^\d{4}-\d{4}$/)
+    .optional(),
+  semesterType: z.enum(semesterTypeArray).optional(),
+  examType: z.enum(examTypeArray).optional(),
+  totalMarks: z
+    .number()
+    .int()
+    .refine((val) => val === 50 || val === 100, {
+      message: "Total marks must be 50 (Sessional) or 100 (End Semester)",
+    })
     .optional(),
   duration: z.number().int().min(30).optional(),
   partAStructure: z.array(partAQuestionSlotSchema).optional(),
@@ -218,12 +228,14 @@ export const updatePatternSchema = z.object({
 /**
  * Get Pattern by ID Schema
  */
-export const getPatternByIdSchema = z.object({
-  id: z.string().uuid("Invalid pattern ID").optional(),
-  patternId: z.string().uuid("Invalid pattern ID").optional(),
-}).refine((data) => data.id || data.patternId, {
-  message: "Either id or patternId must be provided",
-});
+export const getPatternByIdSchema = z
+  .object({
+    id: z.string().uuid("Invalid pattern ID").optional(),
+    patternId: z.string().uuid("Invalid pattern ID").optional(),
+  })
+  .refine((data) => data.id || data.patternId, {
+    message: "Either id or patternId must be provided",
+  });
 
 /**
  * Get Patterns List Schema
@@ -237,7 +249,6 @@ export const getPatternsSchema = z.object({
       "DRAFT",
       "PENDING_MC_APPROVAL",
       "PENDING_PC_APPROVAL",
-      "PENDING_COE_APPROVAL",
       "APPROVED",
       "REJECTED",
     ])

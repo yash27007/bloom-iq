@@ -10,8 +10,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/hash-password";
-import { PrismaClientKnownRequestError } from "@/generated/prisma/runtime/library";
-import type { Prisma, Role } from "@/generated/prisma";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/client";
+import type { Prisma, Role } from "@/generated/prisma/client";
 import { paginate, safeOrderBy } from "@/validators/common.validators";
 import {
   userSortableKeys,
@@ -90,7 +90,7 @@ export class UserService {
    * Create a new user
    */
   static async createUser(
-    input: CreateUserInput
+    input: CreateUserInput,
   ): Promise<ServiceResult<UserResponse>> {
     try {
       const user = await prisma.user.create({
@@ -144,7 +144,7 @@ export class UserService {
    * List users with pagination, search, and filtering
    */
   static async listUsers(
-    input: ListUsersInput
+    input: ListUsersInput,
   ): Promise<ServiceResult<UserResponse[]>> {
     const { page, limit, search, role, isActive, sortBy, sortOrder } = input;
     const { skip, take } = paginate(page, limit);
@@ -247,7 +247,7 @@ export class UserService {
    * Update user details
    */
   static async updateUser(
-    input: UpdateUserInput
+    input: UpdateUserInput,
   ): Promise<ServiceResult<UserResponse>> {
     const { id, password, ...rest } = input;
 
@@ -325,7 +325,7 @@ export class UserService {
 
       if (blockingAssignments > 0) {
         throw new Error(
-          "Cannot delete a user who is assigned to courses. Reassign those courses first."
+          "Cannot delete a user who is assigned to courses. Reassign those courses first.",
         );
       }
 
@@ -364,7 +364,7 @@ export class UserService {
 
       if (blockingAssignments > 0) {
         throw new Error(
-          "Cannot delete users who are assigned to courses. Reassign those courses first."
+          "Cannot delete users who are assigned to courses. Reassign those courses first.",
         );
       }
 

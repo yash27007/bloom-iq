@@ -46,6 +46,7 @@ interface Paper {
     setVariant: string;
     status: string;
     isFinalized: boolean;
+    paperContent?: string | null;
     generatedAt: Date | null;
     finalizedAt: Date | null;
     pattern: {
@@ -62,24 +63,40 @@ interface Paper {
 }
 
 type PaperStatus = "DRAFT" | "GENERATED" | "FINALIZED";
+const ALL_COURSES = "ALL_COURSES";
+const ALL_STATUSES = "ALL_STATUSES";
 
 export default function ViewPapersPage() {
     const router = useRouter();
-    const [courseFilter, setCourseFilter] = useState<string>("");
-    const [statusFilter, setStatusFilter] = useState<PaperStatus | "">("");
+    const [courseFilter, setCourseFilter] = useState<string>(ALL_COURSES);
+    const [statusFilter, setStatusFilter] = useState<PaperStatus | typeof ALL_STATUSES>(ALL_STATUSES);
     const [paperToDelete, setPaperToDelete] = useState<string | null>(null);
 
     const utils = trpc.useUtils();
 
     // Get papers
     const { data: papers, isLoading } = trpc.paper.getPapers.useQuery({
-        courseId: courseFilter || undefined,
-        status: statusFilter ? statusFilter as PaperStatus : undefined,
+        courseId: courseFilter === ALL_COURSES ? undefined : courseFilter,
+        status: statusFilter === ALL_STATUSES ? undefined : statusFilter as PaperStatus,
     });
 
     // Get courses (for filter)
     const { data: coursesData } = trpc.coordinator.getCoursesForMaterialUpload.useQuery();
     const courses = coursesData || [];
+    const { data: committeeContext } = trpc.paper.getCommitteeContext.useQuery();
+    const currentRole = committeeContext?.role;
+
+    const getApprovals = (paper: Paper) => {
+        try {
+            const parsed = paper.paperContent ? JSON.parse(paper.paperContent) : {};
+            return {
+                deanApproved: Boolean(parsed?.approvals?.deanApproved),
+                coeApproved: Boolean(parsed?.approvals?.coeApproved),
+            };
+        } catch {
+            return { deanApproved: false, coeApproved: false };
+        }
+    };
 
     // Finalize mutation
     const finalizeMutation = trpc.paper.finalizePaper.useMutation({
@@ -89,6 +106,16 @@ export default function ViewPapersPage() {
         },
         onError: (error: { message?: string }) => {
             toast.error(error.message || "Failed to finalize paper");
+        },
+    });
+
+    const approveByDeanMutation = trpc.paper.approvePaperByDean.useMutation({
+        onSuccess: () => {
+            toast.success("Paper approved by Dean");
+            utils.paper.getPapers.invalidate();
+        },
+        onError: (error: { message?: string }) => {
+            toast.error(error.message || "Failed to approve paper");
         },
     });
 
@@ -108,6 +135,10 @@ export default function ViewPapersPage() {
         finalizeMutation.mutate({ paperId });
     };
 
+    const handleApproveByDean = (paperId: string) => {
+        approveByDeanMutation.mutate({ paperId });
+    };
+
     const handleDelete = () => {
         if (paperToDelete) {
             deleteMutation.mutate({ paperId: paperToDelete });
@@ -115,11 +146,15 @@ export default function ViewPapersPage() {
     };
 
     const getStatusBadge = (paper: Paper) => {
+        const approvals = getApprovals(paper);
         if (paper.isFinalized) {
             return <Badge variant="success">Finalized</Badge>;
         }
+        if (approvals.deanApproved) {
+            return <Badge variant="warning">Dean Approved</Badge>;
+        }
         if (paper.status === "GENERATED") {
-            return <Badge variant="warning">Draft</Badge>;
+            return <Badge variant="default">Generated</Badge>;
         }
         return <Badge variant="default">{paper.status}</Badge>;
     };
@@ -162,7 +197,7 @@ export default function ViewPapersPage() {
                                     <SelectValue placeholder="All courses" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="">All Courses</SelectItem>
+                                    <SelectItem value={ALL_COURSES}>All Courses</SelectItem>
                                     {courses.map((course: { id: string; course_code: string; name: string }) => (
                                         <SelectItem key={course.id} value={course.id}>
                                             {course.course_code} - {course.name}
@@ -174,12 +209,12 @@ export default function ViewPapersPage() {
 
                         <div className="space-y-2">
                             <Label htmlFor="statusFilter">Status</Label>
-                            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as PaperStatus | "")}>
+                            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as PaperStatus | typeof ALL_STATUSES)}>
                                 <SelectTrigger id="statusFilter">
                                     <SelectValue placeholder="All statuses" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="">All Statuses</SelectItem>
+                                    <SelectItem value={ALL_STATUSES}>All Statuses</SelectItem>
                                     <SelectItem value="DRAFT">Draft</SelectItem>
                                     <SelectItem value="GENERATED">Generated</SelectItem>
                                     <SelectItem value="FINALIZED">Finalized</SelectItem>
@@ -272,6 +307,20 @@ export default function ViewPapersPage() {
                                     </div>
                                 )}
 
+                                {!paper.isFinalized && getApprovals(paper).deanApproved && (
+                                    <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                                        <CheckCircle className="h-5 w-5 text-blue-600" />
+                                        <div>
+                                            <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                                                Dean Approved
+                                            </p>
+                                            <p className="text-xs text-blue-700 dark:text-blue-300">
+                                                Awaiting COE final approval
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+
                                 {/* Actions */}
                                 <div className="flex gap-2">
                                     <Button
@@ -284,33 +333,58 @@ export default function ViewPapersPage() {
 
                                     {!paper.isFinalized && (
                                         <>
-                                            <Button
-                                                size="sm"
-                                                variant="outline"
-                                                onClick={() => handleFinalize(paper.id)}
-                                                disabled={finalizeMutation.isPending}
-                                            >
-                                                {finalizeMutation.isPending ? (
-                                                    <>
-                                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                        Finalizing...
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <CheckCircle className="mr-2 h-4 w-4" />
-                                                        Finalize
-                                                    </>
-                                                )}
-                                            </Button>
+                                            {currentRole === "DEAN" && !getApprovals(paper).deanApproved && (
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => handleApproveByDean(paper.id)}
+                                                    disabled={approveByDeanMutation.isPending}
+                                                >
+                                                    {approveByDeanMutation.isPending ? (
+                                                        <>
+                                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                            Approving...
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <CheckCircle className="mr-2 h-4 w-4" />
+                                                            Dean Approve
+                                                        </>
+                                                    )}
+                                                </Button>
+                                            )}
 
-                                            <Button
-                                                size="sm"
-                                                variant="destructive"
-                                                onClick={() => setPaperToDelete(paper.id)}
-                                            >
-                                                <Trash2 className="mr-2 h-4 w-4" />
-                                                Delete
-                                            </Button>
+                                            {currentRole === "CONTROLLER_OF_EXAMINATION" && getApprovals(paper).deanApproved && (
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => handleFinalize(paper.id)}
+                                                    disabled={finalizeMutation.isPending}
+                                                >
+                                                    {finalizeMutation.isPending ? (
+                                                        <>
+                                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                            Finalizing...
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <CheckCircle className="mr-2 h-4 w-4" />
+                                                            COE Final Approve
+                                                        </>
+                                                    )}
+                                                </Button>
+                                            )}
+
+                                            {currentRole === "CONTROLLER_OF_EXAMINATION" && (
+                                                <Button
+                                                    size="sm"
+                                                    variant="destructive"
+                                                    onClick={() => setPaperToDelete(paper.id)}
+                                                >
+                                                    <Trash2 className="mr-2 h-4 w-4" />
+                                                    Delete
+                                                </Button>
+                                            )}
                                         </>
                                     )}
                                 </div>

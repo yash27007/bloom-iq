@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -46,6 +46,7 @@ const courseSchema = z.object({
     courseCode: z.string().min(2, "Course code must be at least 2 characters").max(20, "Course code must be less than 20 characters"),
     courseName: z.string().min(2, "Course name must be at least 2 characters").max(200, "Course name must be less than 200 characters"),
     description: z.string().optional(),
+    departmentId: z.string().min(1, "Department is required"),
     courseCoordinatorId: z.string().min(1, "Course coordinator is required"),
     moduleCoordinatorId: z.string().min(1, "Module coordinator is required"),
     programCoordinatorId: z.string().min(1, "Program coordinator is required"),
@@ -55,6 +56,7 @@ const editCourseSchema = z.object({
     courseCode: z.string().min(2, "Course code must be at least 2 characters").max(20, "Course code must be less than 20 characters").optional(),
     courseName: z.string().min(2, "Course name must be at least 2 characters").max(200, "Course name must be less than 200 characters").optional(),
     description: z.string().optional(),
+    departmentId: z.string().optional(),
     courseCoordinatorId: z.string().min(1, "Course coordinator is required").optional(),
     moduleCoordinatorId: z.string().min(1, "Module coordinator is required").optional(),
     programCoordinatorId: z.string().min(1, "Program coordinator is required").optional(),
@@ -68,6 +70,11 @@ export interface ClientCourse {
     id: string;
     course_code: string;
     name: string;
+    department?: {
+        id: string;
+        code: string;
+        name: string;
+    } | null;
     courseCoordinator: {
         id: string;
         firstName: string;
@@ -106,6 +113,7 @@ interface Coordinator {
     email: string;
     facultyId: string;
     role: string;
+    departmentId: string | null;
 }
 
 interface AddCourseSheetProps {
@@ -116,9 +124,10 @@ interface AddCourseSheetProps {
         moduleCoordinators: Coordinator[];
         programCoordinators: Coordinator[];
     };
+    departments?: Array<{ id: string; code: string; name: string }>;
 }
 
-export function AddCourseSheet({ children, onSubmit, coordinators }: AddCourseSheetProps) {
+export function AddCourseSheet({ children, onSubmit, coordinators, departments = [] }: AddCourseSheetProps) {
     const [open, setOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -128,11 +137,61 @@ export function AddCourseSheet({ children, onSubmit, coordinators }: AddCourseSh
             courseCode: "",
             courseName: "",
             description: "",
+            departmentId: "",
             courseCoordinatorId: "",
             moduleCoordinatorId: "",
             programCoordinatorId: "",
         },
     });
+
+    const selectedDepartmentId = form.watch("departmentId");
+
+    const filteredCoordinators = useMemo(() => {
+        if (!selectedDepartmentId) {
+            return {
+                courseCoordinators: [] as Coordinator[],
+                moduleCoordinators: [] as Coordinator[],
+                programCoordinators: [] as Coordinator[],
+            };
+        }
+
+        return {
+            courseCoordinators: coordinators.courseCoordinators.filter(
+                (c) => c.departmentId === selectedDepartmentId
+            ),
+            moduleCoordinators: coordinators.moduleCoordinators.filter(
+                (c) => c.departmentId === selectedDepartmentId
+            ),
+            programCoordinators: coordinators.programCoordinators.filter(
+                (c) => c.departmentId === selectedDepartmentId
+            ),
+        };
+    }, [coordinators, selectedDepartmentId]);
+
+    useEffect(() => {
+        const currentCourse = form.getValues("courseCoordinatorId");
+        const currentModule = form.getValues("moduleCoordinatorId");
+        const currentProgram = form.getValues("programCoordinatorId");
+
+        if (
+            currentCourse &&
+            !filteredCoordinators.courseCoordinators.some((c) => c.id === currentCourse)
+        ) {
+            form.setValue("courseCoordinatorId", "");
+        }
+        if (
+            currentModule &&
+            !filteredCoordinators.moduleCoordinators.some((c) => c.id === currentModule)
+        ) {
+            form.setValue("moduleCoordinatorId", "");
+        }
+        if (
+            currentProgram &&
+            !filteredCoordinators.programCoordinators.some((c) => c.id === currentProgram)
+        ) {
+            form.setValue("programCoordinatorId", "");
+        }
+    }, [filteredCoordinators, form, selectedDepartmentId]);
 
     const handleSubmit = async (data: CourseFormData) => {
         setIsSubmitting(true);
@@ -211,6 +270,31 @@ export function AddCourseSheet({ children, onSubmit, coordinators }: AddCourseSh
 
                             <FormField
                                 control={form.control}
+                                name="departmentId"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Department *</FormLabel>
+                                        <Select onValueChange={field.onChange} value={field.value}>
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Select department" />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                {departments.map((department) => (
+                                                    <SelectItem key={department.id} value={department.id}>
+                                                        {department.code} - {department.name}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
                                 name="courseCoordinatorId"
                                 render={({ field }) => (
                                     <FormItem>
@@ -222,7 +306,7 @@ export function AddCourseSheet({ children, onSubmit, coordinators }: AddCourseSh
                                                 </SelectTrigger>
                                             </FormControl>
                                             <SelectContent>
-                                                {coordinators.courseCoordinators.map((coordinator) => (
+                                                {filteredCoordinators.courseCoordinators.map((coordinator) => (
                                                     <SelectItem key={coordinator.id} value={coordinator.id}>
                                                         {coordinator.firstName} {coordinator.lastName} ({coordinator.facultyId})
                                                     </SelectItem>
@@ -247,7 +331,7 @@ export function AddCourseSheet({ children, onSubmit, coordinators }: AddCourseSh
                                                 </SelectTrigger>
                                             </FormControl>
                                             <SelectContent>
-                                                {coordinators.moduleCoordinators.map((coordinator) => (
+                                                {filteredCoordinators.moduleCoordinators.map((coordinator) => (
                                                     <SelectItem key={coordinator.id} value={coordinator.id}>
                                                         {coordinator.firstName} {coordinator.lastName} ({coordinator.facultyId})
                                                     </SelectItem>
@@ -272,7 +356,7 @@ export function AddCourseSheet({ children, onSubmit, coordinators }: AddCourseSh
                                                 </SelectTrigger>
                                             </FormControl>
                                             <SelectContent>
-                                                {coordinators.programCoordinators.map((coordinator) => (
+                                                {filteredCoordinators.programCoordinators.map((coordinator) => (
                                                     <SelectItem key={coordinator.id} value={coordinator.id}>
                                                         {coordinator.firstName} {coordinator.lastName} ({coordinator.facultyId})
                                                     </SelectItem>
@@ -316,9 +400,10 @@ interface EditCourseDialogProps {
         moduleCoordinators: Coordinator[];
         programCoordinators: Coordinator[];
     };
+    departments?: Array<{ id: string; code: string; name: string }>;
 }
 
-export function EditCourseDialog({ course, open, onClose, onSubmit, coordinators }: EditCourseDialogProps) {
+export function EditCourseDialog({ course, open, onClose, onSubmit, coordinators, departments = [] }: EditCourseDialogProps) {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     const form = useForm<EditCourseFormData>({
@@ -326,11 +411,59 @@ export function EditCourseDialog({ course, open, onClose, onSubmit, coordinators
         defaultValues: {
             courseCode: course.course_code,
             courseName: course.name,
+            departmentId: course.department?.id || "",
             courseCoordinatorId: course.courseCoordinator?.id || "",
             moduleCoordinatorId: course.moduleCoordinator?.id || "",
             programCoordinatorId: course.programCoordinator?.id || "",
         },
     });
+
+    const selectedDepartmentId = form.watch("departmentId");
+
+    const filteredCoordinators = useMemo(() => {
+        if (!selectedDepartmentId) {
+            return coordinators;
+        }
+
+        return {
+            courseCoordinators: coordinators.courseCoordinators.filter(
+                (c) => c.departmentId === selectedDepartmentId
+            ),
+            moduleCoordinators: coordinators.moduleCoordinators.filter(
+                (c) => c.departmentId === selectedDepartmentId
+            ),
+            programCoordinators: coordinators.programCoordinators.filter(
+                (c) => c.departmentId === selectedDepartmentId
+            ),
+        };
+    }, [coordinators, selectedDepartmentId]);
+
+    useEffect(() => {
+        if (!selectedDepartmentId) return;
+
+        const currentCourse = form.getValues("courseCoordinatorId");
+        const currentModule = form.getValues("moduleCoordinatorId");
+        const currentProgram = form.getValues("programCoordinatorId");
+
+        if (
+            currentCourse &&
+            !filteredCoordinators.courseCoordinators.some((c) => c.id === currentCourse)
+        ) {
+            form.setValue("courseCoordinatorId", "");
+        }
+        if (
+            currentModule &&
+            !filteredCoordinators.moduleCoordinators.some((c) => c.id === currentModule)
+        ) {
+            form.setValue("moduleCoordinatorId", "");
+        }
+        if (
+            currentProgram &&
+            !filteredCoordinators.programCoordinators.some((c) => c.id === currentProgram)
+        ) {
+            form.setValue("programCoordinatorId", "");
+        }
+    }, [filteredCoordinators, form, selectedDepartmentId]);
 
     const handleSubmit = async (data: EditCourseFormData) => {
         setIsSubmitting(true);
@@ -386,6 +519,31 @@ export function EditCourseDialog({ course, open, onClose, onSubmit, coordinators
 
                         <FormField
                             control={form.control}
+                            name="departmentId"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Department</FormLabel>
+                                    <Select onValueChange={field.onChange} value={field.value}>
+                                        <FormControl>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Select department" />
+                                            </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                            {departments.map((department) => (
+                                                <SelectItem key={department.id} value={department.id}>
+                                                    {department.code} - {department.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+
+                        <FormField
+                            control={form.control}
                             name="courseCoordinatorId"
                             render={({ field }) => (
                                 <FormItem>
@@ -397,7 +555,7 @@ export function EditCourseDialog({ course, open, onClose, onSubmit, coordinators
                                             </SelectTrigger>
                                         </FormControl>
                                         <SelectContent>
-                                            {coordinators.courseCoordinators.map((coordinator) => (
+                                            {filteredCoordinators.courseCoordinators.map((coordinator) => (
                                                 <SelectItem key={coordinator.id} value={coordinator.id}>
                                                     {coordinator.firstName} {coordinator.lastName} ({coordinator.facultyId})
                                                 </SelectItem>
@@ -422,7 +580,7 @@ export function EditCourseDialog({ course, open, onClose, onSubmit, coordinators
                                             </SelectTrigger>
                                         </FormControl>
                                         <SelectContent>
-                                            {coordinators.moduleCoordinators.map((coordinator) => (
+                                            {filteredCoordinators.moduleCoordinators.map((coordinator) => (
                                                 <SelectItem key={coordinator.id} value={coordinator.id}>
                                                     {coordinator.firstName} {coordinator.lastName} ({coordinator.facultyId})
                                                 </SelectItem>
@@ -447,7 +605,7 @@ export function EditCourseDialog({ course, open, onClose, onSubmit, coordinators
                                             </SelectTrigger>
                                         </FormControl>
                                         <SelectContent>
-                                            {coordinators.programCoordinators.map((coordinator) => (
+                                            {filteredCoordinators.programCoordinators.map((coordinator) => (
                                                 <SelectItem key={coordinator.id} value={coordinator.id}>
                                                     {coordinator.firstName} {coordinator.lastName} ({coordinator.facultyId})
                                                 </SelectItem>

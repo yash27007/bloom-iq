@@ -46,6 +46,7 @@ export default function GeneratePaperPage() {
     const router = useRouter();
     const [selectedPatternId, setSelectedPatternId] = useState("");
     const [setVariant, setSetVariant] = useState("SET-A");
+    const { data: committeeContext } = trpc.paper.getCommitteeContext.useQuery();
 
     // Get approved patterns
     const { data: patterns, isLoading } = trpc.pattern.getApprovedPatterns.useQuery();
@@ -87,6 +88,26 @@ export default function GeneratePaperPage() {
         return (
             <div className="container mx-auto py-6 flex items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
+        );
+    }
+
+    if (committeeContext?.role && committeeContext.role !== "HOD") {
+        return (
+            <div className="container mx-auto py-6">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Access Restricted</CardTitle>
+                        <CardDescription>
+                            Only HoD can generate papers after coordinator approvals.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <Button variant="outline" onClick={() => router.push("/coe/dashboard/view-papers")}>
+                            Go to View Papers
+                        </Button>
+                    </CardContent>
+                </Card>
             </div>
         );
     }
@@ -224,7 +245,7 @@ export default function GeneratePaperPage() {
                                             Pattern Fully Approved
                                         </p>
                                         <p className="text-xs text-green-700 dark:text-green-300">
-                                            Approved by MC, PC, and COE
+                                            Approved by MC and PC
                                         </p>
                                     </div>
                                 </div>
@@ -255,6 +276,9 @@ export default function GeneratePaperPage() {
                                 </li>
                                 <li>
                                     You can preview and finalize the paper after generation
+                                </li>
+                                <li>
+                                    Confidential access is restricted to HoD, Dean, and COE only
                                 </li>
                             </ul>
                         </CardContent>
