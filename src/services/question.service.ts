@@ -16,6 +16,7 @@ import type {
   DifficultyLevel,
   GenerationType,
   Marks,
+  RenderingType,
 } from "@/generated/prisma/client";
 import type { ServiceResult } from "./types";
 
@@ -81,6 +82,9 @@ export type QuestionResponse = {
   pcApprovedAt?: Date | null;
   materialName?: string | null;
   isFinalized: boolean;
+  renderingType?: RenderingType;
+  latexContent?: string | null;
+  mermaidContent?: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -144,6 +148,9 @@ export class QuestionService {
         pcApprovedAt: true,
         materialName: true,
         isFinalized: true,
+        renderingType: true,
+        latexContent: true,
+        mermaidContent: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -291,6 +298,9 @@ export class QuestionService {
         pcApprovedAt: true,
         materialName: true,
         isFinalized: true,
+        renderingType: true,
+        latexContent: true,
+        mermaidContent: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -511,6 +521,7 @@ export class QuestionService {
     courseId: string,
     filters?: {
       status?: QuestionStatus;
+      statuses?: QuestionStatus[];
       unit?: number;
       bloomLevel?: BloomLevel;
       difficultyLevel?: DifficultyLevel;
@@ -520,6 +531,9 @@ export class QuestionService {
       where: {
         courseId,
         ...(filters?.status && { status: filters.status }),
+        ...(!filters?.status &&
+          filters?.statuses &&
+          filters.statuses.length > 0 && { status: { in: filters.statuses } }),
         ...(filters?.unit && { unit: filters.unit }),
         ...(filters?.bloomLevel && { bloomLevel: filters.bloomLevel }),
         ...(filters?.difficultyLevel && {
@@ -606,6 +620,9 @@ export class QuestionService {
         pcApprovedAt: true,
         materialName: true,
         isFinalized: true,
+        renderingType: true,
+        latexContent: true,
+        mermaidContent: true,
         createdAt: true,
         updatedAt: true,
         feedback: {

@@ -549,13 +549,11 @@ export const coordinatorRouter = createTRPCRouter({
             ? { moduleCoordinatorId: userId }
             : userRole === "PROGRAM_COORDINATOR"
               ? { programCoordinatorId: userId }
-              : userRole === "HOD"
-                ? { department: { hodId: userId } }
-                : userRole === "DEAN"
-                  ? { department: { deanId: userId } }
-                  : userRole === "CONTROLLER_OF_EXAMINATION"
-                    ? {}
-                    : { id: "__no_access__" };
+              : userRole === "HOD" ||
+                  userRole === "DEAN" ||
+                  userRole === "CONTROLLER_OF_EXAMINATION"
+                ? {}
+                : { id: "__no_access__" };
 
       const courses = await prisma.course.findMany({
         where,

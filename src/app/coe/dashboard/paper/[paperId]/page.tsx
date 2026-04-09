@@ -7,6 +7,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import {
     Card,
     CardContent,
     CardHeader,
@@ -32,6 +39,7 @@ import {
     Key,
     Pencil,
     Sparkles,
+    Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -43,6 +51,14 @@ interface PaperViewProps {
     }>;
 }
 
+type EditableBloomLevel =
+    | "REMEMBER"
+    | "UNDERSTAND"
+    | "APPLY"
+    | "ANALYZE"
+    | "EVALUATE"
+    | "CREATE";
+
 export default function PaperViewPage({ params }: PaperViewProps) {
     const { paperId } = use(params);
     const router = useRouter();
@@ -52,6 +68,10 @@ export default function PaperViewPage({ params }: PaperViewProps) {
     const [editSection, setEditSection] = useState<"partA" | "partB">("partA");
     const [editQuestionNumber, setEditQuestionNumber] = useState<number>(0);
     const [editedQuestionText, setEditedQuestionText] = useState("");
+    const [editedMarks, setEditedMarks] = useState<number>(2);
+    const [editedBloomLevel, setEditedBloomLevel] = useState<EditableBloomLevel>("APPLY");
+    const [editedMappingCO, setEditedMappingCO] = useState("-");
+    const [isRegeneratingQuestion, setIsRegeneratingQuestion] = useState(false);
     const [examDate, setExamDate] = useState("");
     const [examTime, setExamTime] = useState("");
 
@@ -109,20 +129,389 @@ export default function PaperViewPage({ params }: PaperViewProps) {
             return;
         }
 
-        if (!paperPrintRef.current) {
-            toast.error("Question paper preview is not ready for printing.");
-            return;
-        }
-
-        const printableHtml = paperPrintRef.current.outerHTML.trim();
-        if (!printableHtml) {
-            toast.error("No printable content found.");
-            return;
-        }
+        const printableHtml = buildQuestionsOnlyHtml();
 
         const result = openProfessionalPrintWindow({
             title: `${paper.paperCode} - Question Paper`,
             html: printableHtml,
+            renderRichContent: true,
+        });
+
+        if (!result.ok) {
+            toast.error(result.error);
+        }
+    };
+
+    const escapeHtml = (value: string) =>
+        value
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+
+    const escapeHtmlAttr = (value: string) =>
+        value
+            .replace(/&/g, "&amp;")
+            .replace(/\"/g, "&quot;")
+            .replace(/'/g, "&#39;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+
+    const renderRichPrintHtml = (value: unknown) => {
+        const raw = String(value ?? "-");
+        if (!raw.trim()) return "-";
+
+        const mermaidBlocks: string[] = [];
+        const latexTokens: Array<{ type: "inline" | "display"; value: string }> = [];
+
+        let processed = raw.replace(/```mermaid\s*([\s\S]*?)```/gi, (_match, code: string) => {
+            const idx = mermaidBlocks.length;
+            mermaidBlocks.push(code.trim());
+            return `@@MERMAID_${idx}@@`;
+        });
+
+        processed = processed.replace(/\$\$([\s\S]*?)\$\$/g, (_match, latex: string) => {
+            const idx = latexTokens.length;
+            latexTokens.push({ type: "display", value: latex.trim() });
+            return `@@LATEX_${idx}@@`;
+        });
+
+        processed = processed.replace(/(?<!\$)\$([^\$\n]+?)\$(?!\$)/g, (_match, latex: string) => {
+            const idx = latexTokens.length;
+            latexTokens.push({ type: "inline", value: latex.trim() });
+            return `@@LATEX_${idx}@@`;
+        });
+
+        processed = escapeHtml(processed).replace(/\n/g, "<br />");
+
+        latexTokens.forEach((token, idx) => {
+            const fallback = token.type === "display"
+                ? `$$${token.value}$$`
+                : `$${token.value}$`;
+
+            const html = token.type === "display"
+                ? `<div class="print-math-display" data-latex="${escapeHtmlAttr(token.value)}">${escapeHtml(fallback)}</div>`
+                : `<span class="print-math-inline" data-latex="${escapeHtmlAttr(token.value)}">${escapeHtml(fallback)}</span>`;
+
+            processed = processed.replace(`@@LATEX_${idx}@@`, html);
+        });
+
+        mermaidBlocks.forEach((code, idx) => {
+            const html = `<div class="print-mermaid-container"><pre class="print-mermaid">${escapeHtml(code)}</pre></div>`;
+            processed = processed.replace(`@@MERMAID_${idx}@@`, html);
+        });
+
+        return processed;
+    };
+
+    const buildQuestionsOnlyHtml = () => {
+        if (!paperContent) return "";
+
+        const partAQuestions = paperContent?.partA?.questions || [];
+        const partBQuestions = paperContent?.partB?.questions || [];
+
+        const partARows = partAQuestions
+            .map(
+                (q: { number?: number; question?: string; marks?: string | number; bloomLevel?: string; mappingCO?: string }) => `
+                <tr>
+                    <td class="border border-black px-2 py-1 col-qno">${escapeHtml(String(q.number || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-question">${renderRichPrintHtml(q.question)}</td>
+                    <td class="border border-black px-2 py-1 col-bloom">${escapeHtml(String(q.bloomLevel || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-co">${escapeHtml(String(q.mappingCO || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-marks">${escapeHtml(String(q.marks || "-"))}</td>
+                </tr>`,
+            )
+            .join("");
+
+        const partBRows = partBQuestions
+            .map(
+                (q: { displayNumber?: string; number?: number; question?: string; marks?: string | number; bloomLevel?: string; mappingCO?: string }) => `
+                <tr>
+                    <td class="border border-black px-2 py-1 col-qno">${escapeHtml(String(q.displayNumber || q.number || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-question">${renderRichPrintHtml(q.question)}</td>
+                    <td class="border border-black px-2 py-1 col-bloom">${escapeHtml(String(q.bloomLevel || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-co">${escapeHtml(String(q.mappingCO || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-marks">${escapeHtml(String(q.marks || "-"))}</td>
+                </tr>`,
+            )
+            .join("");
+
+        return `
+            <div class="space-y-6 max-w-5xl mx-auto text-sm">
+                <div class="text-center space-y-1">
+                    <h2 class="text-xl font-bold uppercase tracking-wide">${escapeHtml(String(paperContent?.header?.institution || "Question Paper"))}</h2>
+                    <p class="font-semibold">${escapeHtml(paper.paperCode)} - Questions Only</p>
+                    <p class="font-medium">${escapeHtml(`${paper.pattern.course.course_code} - ${paper.pattern.course.name}`)}</p>
+                </div>
+
+                <div class="space-y-2">
+                    <h3 class="font-bold text-base">PART - A</h3>
+                    <table class="w-full border border-black border-collapse print-paper-table">
+                        <colgroup>
+                            <col style="width: 11%" />
+                            <col style="width: 59%" />
+                            <col style="width: 14%" />
+                            <col style="width: 8%" />
+                            <col style="width: 8%" />
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="border border-black px-2 py-1 text-left">Question No</th>
+                                <th class="border border-black px-2 py-1 text-left">Question</th>
+                                <th class="border border-black px-2 py-1 text-left">Bloom</th>
+                                <th class="border border-black px-2 py-1 text-left">CO</th>
+                                <th class="border border-black px-2 py-1 text-left">Marks</th>
+                            </tr>
+                        </thead>
+                        <tbody>${partARows}</tbody>
+                    </table>
+                </div>
+
+                <div class="space-y-2">
+                    <h3 class="font-bold text-base">PART - B</h3>
+                    <table class="w-full border border-black border-collapse print-paper-table">
+                        <colgroup>
+                            <col style="width: 11%" />
+                            <col style="width: 59%" />
+                            <col style="width: 14%" />
+                            <col style="width: 8%" />
+                            <col style="width: 8%" />
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="border border-black px-2 py-1 text-left">Question No</th>
+                                <th class="border border-black px-2 py-1 text-left">Question</th>
+                                <th class="border border-black px-2 py-1 text-left">Bloom</th>
+                                <th class="border border-black px-2 py-1 text-left">CO</th>
+                                <th class="border border-black px-2 py-1 text-left">Marks</th>
+                            </tr>
+                        </thead>
+                        <tbody>${partBRows}</tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    };
+
+    const buildAnswersOnlyHtml = () => {
+        if (!answerKeyContent) return "";
+
+        const partARows = (answerKeyContent.partA || [])
+            .map(
+                (item: { number?: number; question?: string; answer?: string; marks?: string | number }) => `
+                <tr>
+                    <td class="border border-black px-2 py-1 col-qno">${escapeHtml(String(item.number || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-question">${renderRichPrintHtml(item.question)}</td>
+                    <td class="border border-black px-2 py-1 col-answer">${renderRichPrintHtml(item.answer)}</td>
+                    <td class="border border-black px-2 py-1 col-marks">${escapeHtml(String(item.marks || "-"))}</td>
+                </tr>`,
+            )
+            .join("");
+
+        const partBRows = (answerKeyContent.partB || [])
+            .map(
+                (item: { number?: number; question?: string; answer?: string; marks?: string | number }) => `
+                <tr>
+                    <td class="border border-black px-2 py-1 col-qno">${escapeHtml(String(item.number || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-question">${renderRichPrintHtml(item.question)}</td>
+                    <td class="border border-black px-2 py-1 col-answer">${renderRichPrintHtml(item.answer)}</td>
+                    <td class="border border-black px-2 py-1 col-marks">${escapeHtml(String(item.marks || "-"))}</td>
+                </tr>`,
+            )
+            .join("");
+
+        return `
+            <div class="space-y-6 max-w-5xl mx-auto text-sm">
+                <div class="text-center space-y-1">
+                    <h2 class="text-xl font-bold uppercase tracking-wide">ANSWER KEY</h2>
+                    <p class="font-semibold">${escapeHtml(paper.paperCode)}</p>
+                    <p class="font-medium">${escapeHtml(`${paper.pattern.course.course_code} - ${paper.pattern.course.name}`)}</p>
+                </div>
+
+                <div class="space-y-2">
+                    <h3 class="font-bold text-base">PART - A</h3>
+                    <table class="w-full border border-black border-collapse print-answer-table">
+                        <colgroup>
+                            <col style="width: 9%" />
+                            <col style="width: 36%" />
+                            <col style="width: 45%" />
+                            <col style="width: 10%" />
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="border border-black px-2 py-1 text-left">Question No</th>
+                                <th class="border border-black px-2 py-1 text-left">Question</th>
+                                <th class="border border-black px-2 py-1 text-left">Answer</th>
+                                <th class="border border-black px-2 py-1 text-left">Marks</th>
+                            </tr>
+                        </thead>
+                        <tbody>${partARows}</tbody>
+                    </table>
+                </div>
+
+                <div class="space-y-2">
+                    <h3 class="font-bold text-base">PART - B</h3>
+                    <table class="w-full border border-black border-collapse print-answer-table">
+                        <colgroup>
+                            <col style="width: 9%" />
+                            <col style="width: 36%" />
+                            <col style="width: 45%" />
+                            <col style="width: 10%" />
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="border border-black px-2 py-1 text-left">Question No</th>
+                                <th class="border border-black px-2 py-1 text-left">Question</th>
+                                <th class="border border-black px-2 py-1 text-left">Answer</th>
+                                <th class="border border-black px-2 py-1 text-left">Marks</th>
+                            </tr>
+                        </thead>
+                        <tbody>${partBRows}</tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    };
+
+    const buildQuestionsWithAnswersHtml = () => {
+        if (!paperContent || !answerKeyContent) return "";
+
+        const partAQuestions = paperContent?.partA?.questions || [];
+        const partAAnswers = answerKeyContent?.partA || [];
+        const partARows = partAQuestions
+            .map(
+                (
+                    q: { number?: number; question?: string; marks?: string | number; bloomLevel?: string; mappingCO?: string },
+                    idx: number,
+                ) => `
+                <tr>
+                    <td class="border border-black px-2 py-1 col-qno">${escapeHtml(String(q.number || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-question">${renderRichPrintHtml(q.question)}</td>
+                    <td class="border border-black px-2 py-1 col-answer">${renderRichPrintHtml(partAAnswers[idx]?.answer)}</td>
+                    <td class="border border-black px-2 py-1 col-bloom">${escapeHtml(String(q.bloomLevel || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-co">${escapeHtml(String(q.mappingCO || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-marks">${escapeHtml(String(q.marks || "-"))}</td>
+                </tr>`,
+            )
+            .join("");
+
+        const partBQuestions = paperContent?.partB?.questions || [];
+        const partBAnswers = answerKeyContent?.partB || [];
+        const partBRows = partBQuestions
+            .map(
+                (
+                    q: {
+                        number?: number;
+                        displayNumber?: string;
+                        question?: string;
+                        marks?: string | number;
+                        bloomLevel?: string;
+                        mappingCO?: string;
+                    },
+                    idx: number,
+                ) => `
+                <tr>
+                    <td class="border border-black px-2 py-1 col-qno">${escapeHtml(String(q.displayNumber || q.number || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-question">${renderRichPrintHtml(q.question)}</td>
+                    <td class="border border-black px-2 py-1 col-answer">${renderRichPrintHtml(partBAnswers[idx]?.answer)}</td>
+                    <td class="border border-black px-2 py-1 col-bloom">${escapeHtml(String(q.bloomLevel || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-co">${escapeHtml(String(q.mappingCO || "-"))}</td>
+                    <td class="border border-black px-2 py-1 col-marks">${escapeHtml(String(q.marks || "-"))}</td>
+                </tr>`,
+            )
+            .join("");
+
+        return `
+            <div class="space-y-6 max-w-5xl mx-auto text-sm">
+                <div class="text-center space-y-1">
+                    <h2 class="text-xl font-bold uppercase tracking-wide">${escapeHtml(String(paperContent?.header?.institution || "Question Paper"))}</h2>
+                    <p class="font-semibold">${escapeHtml(paper.paperCode)} - Questions with Answers</p>
+                    <p class="font-medium">${escapeHtml(`${paper.pattern.course.course_code} - ${paper.pattern.course.name}`)}</p>
+                </div>
+
+                <div class="space-y-2">
+                    <h3 class="font-bold text-base">PART - A</h3>
+                    <table class="w-full border border-black border-collapse print-qna-table">
+                        <colgroup>
+                            <col style="width: 8%" />
+                            <col style="width: 36%" />
+                            <col style="width: 34%" />
+                            <col style="width: 10%" />
+                            <col style="width: 6%" />
+                            <col style="width: 6%" />
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="border border-black px-2 py-1 text-left">Question No</th>
+                                <th class="border border-black px-2 py-1 text-left">Question</th>
+                                <th class="border border-black px-2 py-1 text-left">Answer Key</th>
+                                <th class="border border-black px-2 py-1 text-left">Bloom</th>
+                                <th class="border border-black px-2 py-1 text-left">CO</th>
+                                <th class="border border-black px-2 py-1 text-left">Marks</th>
+                            </tr>
+                        </thead>
+                        <tbody>${partARows}</tbody>
+                    </table>
+                </div>
+
+                <div class="space-y-2">
+                    <h3 class="font-bold text-base">PART - B</h3>
+                    <table class="w-full border border-black border-collapse print-qna-table">
+                        <colgroup>
+                            <col style="width: 8%" />
+                            <col style="width: 36%" />
+                            <col style="width: 34%" />
+                            <col style="width: 10%" />
+                            <col style="width: 6%" />
+                            <col style="width: 6%" />
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="border border-black px-2 py-1 text-left">Question No</th>
+                                <th class="border border-black px-2 py-1 text-left">Question</th>
+                                <th class="border border-black px-2 py-1 text-left">Answer Key</th>
+                                <th class="border border-black px-2 py-1 text-left">Bloom</th>
+                                <th class="border border-black px-2 py-1 text-left">CO</th>
+                                <th class="border border-black px-2 py-1 text-left">Marks</th>
+                            </tr>
+                        </thead>
+                        <tbody>${partBRows}</tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    };
+
+    const handleDownloadAnswersOnly = () => {
+        if (!answerKeyContent) {
+            toast.error("Answer key content is not available for download.");
+            return;
+        }
+
+        const html = buildAnswersOnlyHtml();
+        const result = openProfessionalPrintWindow({
+            title: `${paper.paperCode} - Answer Key`,
+            html,
+            renderRichContent: true,
+        });
+
+        if (!result.ok) {
+            toast.error(result.error);
+        }
+    };
+
+    const handleDownloadQuestionsWithAnswers = () => {
+        if (!paperContent || !answerKeyContent) {
+            toast.error("Question paper or answer key content is not available for download.");
+            return;
+        }
+
+        const html = buildQuestionsWithAnswersHtml();
+        const result = openProfessionalPrintWindow({
+            title: `${paper.paperCode} - Questions and Answers`,
+            html,
+            renderRichContent: true,
         });
 
         if (!result.ok) {
@@ -138,6 +527,20 @@ export default function PaperViewPage({ params }: PaperViewProps) {
         },
         onError: (error: { message?: string }) => {
             toast.error(error.message || "Failed to update paper question");
+        },
+    });
+
+    const regeneratePaperQuestionMutation = trpc.paper.regeneratePaperQuestionForQuestion.useMutation({
+        onSuccess: (data: { question: string }) => {
+            setEditedQuestionText(data.question);
+            toast.success("Question regenerated and answer key refreshed");
+            utils.paper.getPaperById.invalidate({ paperId });
+        },
+        onError: (error: { message?: string }) => {
+            toast.error(error.message || "Failed to regenerate question");
+        },
+        onSettled: () => {
+            setIsRegeneratingQuestion(false);
         },
     });
 
@@ -161,10 +564,30 @@ export default function PaperViewPage({ params }: PaperViewProps) {
         },
     });
 
-    const openEditDialog = (section: "partA" | "partB", questionNumber: number, questionText: string) => {
+    const deletePaperQuestionMutation = trpc.paper.deletePaperQuestion.useMutation({
+        onSuccess: () => {
+            toast.success("Question removed from generated paper");
+            utils.paper.getPaperById.invalidate({ paperId });
+        },
+        onError: (error: { message?: string }) => {
+            toast.error(error.message || "Failed to delete question");
+        },
+    });
+
+    const openEditDialog = (
+        section: "partA" | "partB",
+        questionNumber: number,
+        questionText: string,
+        marks: number,
+        bloomLevel: EditableBloomLevel,
+        mappingCO: string,
+    ) => {
         setEditSection(section);
         setEditQuestionNumber(questionNumber);
         setEditedQuestionText(questionText);
+        setEditedMarks(marks);
+        setEditedBloomLevel(bloomLevel);
+        setEditedMappingCO(mappingCO || "-");
         setEditDialogOpen(true);
     };
 
@@ -179,6 +602,21 @@ export default function PaperViewPage({ params }: PaperViewProps) {
             section: editSection,
             questionNumber: editQuestionNumber,
             question: editedQuestionText.trim(),
+            marks: editedMarks,
+            bloomLevel: editedBloomLevel,
+            mappingCO: editedMappingCO.trim(),
+        });
+    };
+
+    const handleRegenerateQuestion = () => {
+        setIsRegeneratingQuestion(true);
+        regeneratePaperQuestionMutation.mutate({
+            paperId,
+            section: editSection,
+            questionNumber: editQuestionNumber,
+            marks: editedMarks,
+            bloomLevel: editedBloomLevel,
+            mappingCO: editedMappingCO.trim(),
         });
     };
 
@@ -187,6 +625,25 @@ export default function PaperViewPage({ params }: PaperViewProps) {
             paperId,
             section: editSection,
             questionNumber: editQuestionNumber,
+            questionText: editedQuestionText.trim(),
+            marks: editedMarks,
+        });
+    };
+
+    const handleDeleteQuestion = (
+        section: "partA" | "partB",
+        questionNumber: number,
+        label: string,
+    ) => {
+        const confirmed = window.confirm(
+            `Delete question ${label} from this generated paper? This cannot be undone.`,
+        );
+        if (!confirmed) return;
+
+        deletePaperQuestionMutation.mutate({
+            paperId,
+            section,
+            questionNumber,
         });
     };
 
@@ -344,8 +801,16 @@ export default function PaperViewPage({ params }: PaperViewProps) {
                         </Button>
                     )}
                     <Button variant="outline" onClick={handlePrint}>
+                        <FileText className="mr-2 h-4 w-4" />
+                        Questions Only
+                    </Button>
+                    <Button variant="outline" onClick={handleDownloadQuestionsWithAnswers}>
                         <Download className="mr-2 h-4 w-4" />
-                        Print / Download
+                        Questions + Answers
+                    </Button>
+                    <Button variant="outline" onClick={handleDownloadAnswersOnly}>
+                        <Key className="mr-2 h-4 w-4" />
+                        Answers Only
                     </Button>
                 </div>
             </div>
@@ -500,11 +965,31 @@ export default function PaperViewPage({ params }: PaperViewProps) {
                                                                         <Button
                                                                             size="sm"
                                                                             variant="outline"
-                                                                            onClick={() => openEditDialog("partA", q.number, q.question)}
+                                                                            onClick={() =>
+                                                                                openEditDialog(
+                                                                                    "partA",
+                                                                                    q.number,
+                                                                                    q.question,
+                                                                                    Number(q.marks || 2),
+                                                                                    ((q.bloomLevel || "APPLY").toUpperCase() as EditableBloomLevel),
+                                                                                    q.mappingCO || "-",
+                                                                                )
+                                                                            }
                                                                         >
                                                                             <Pencil className="mr-1 h-3 w-3" />
                                                                             Edit
                                                                         </Button>
+                                                                        {!paper.isFinalized && (
+                                                                            <Button
+                                                                                size="sm"
+                                                                                variant="destructive"
+                                                                                onClick={() => handleDeleteQuestion("partA", q.number, String(q.number))}
+                                                                                disabled={deletePaperQuestionMutation.isPending}
+                                                                            >
+                                                                                <Trash2 className="mr-1 h-3 w-3" />
+                                                                                Delete
+                                                                            </Button>
+                                                                        )}
                                                                     </div>
                                                                 </div>
                                                             </td>
@@ -579,11 +1064,31 @@ export default function PaperViewPage({ params }: PaperViewProps) {
                                                                                 <Button
                                                                                     size="sm"
                                                                                     variant="outline"
-                                                                                    onClick={() => openEditDialog("partB", q.number, q.question)}
+                                                                                    onClick={() =>
+                                                                                        openEditDialog(
+                                                                                            "partB",
+                                                                                            q.number,
+                                                                                            q.question,
+                                                                                            Number(q.marks || 16),
+                                                                                            ((q.bloomLevel || "APPLY").toUpperCase() as EditableBloomLevel),
+                                                                                            q.mappingCO || "-",
+                                                                                        )
+                                                                                    }
                                                                                 >
                                                                                     <Pencil className="mr-1 h-3 w-3" />
                                                                                     Edit
                                                                                 </Button>
+                                                                                {!paper.isFinalized && (
+                                                                                    <Button
+                                                                                        size="sm"
+                                                                                        variant="destructive"
+                                                                                        onClick={() => handleDeleteQuestion("partB", q.number, String(q.displayNumber || q.number))}
+                                                                                        disabled={deletePaperQuestionMutation.isPending}
+                                                                                    >
+                                                                                        <Trash2 className="mr-1 h-3 w-3" />
+                                                                                        Delete
+                                                                                    </Button>
+                                                                                )}
                                                                             </div>
                                                                         </div>
                                                                     </td>
@@ -729,11 +1234,11 @@ export default function PaperViewPage({ params }: PaperViewProps) {
             </Tabs>
 
             <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-                <DialogContent className="max-w-2xl">
+                <DialogContent className="w-[96vw] max-w-4xl">
                     <DialogHeader>
                         <DialogTitle>Edit Generated Question</DialogTitle>
                         <DialogDescription>
-                            Update the question and regenerate the answer key entry for this item.
+                            Editing {editSection === "partA" ? "Part A" : "Part B"} question {editQuestionNumber}. Update the text and optionally regenerate question/answer.
                         </DialogDescription>
                     </DialogHeader>
 
@@ -741,42 +1246,142 @@ export default function PaperViewPage({ params }: PaperViewProps) {
                         <Textarea
                             value={editedQuestionText}
                             onChange={(e) => setEditedQuestionText(e.target.value)}
-                            rows={6}
+                            rows={5}
+                            className="min-h-[120px]"
                         />
                     </div>
 
-                    <DialogFooter>
-                        <Button
-                            variant="outline"
-                            onClick={handleRegenerateAnswer}
-                            disabled={regeneratePaperAnswerMutation.isPending || updatePaperQuestionMutation.isPending}
-                        >
-                            {regeneratePaperAnswerMutation.isPending ? (
-                                <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Regenerating...
-                                </>
-                            ) : (
-                                <>
-                                    <Sparkles className="mr-2 h-4 w-4" />
-                                    Regenerate Answer Key
-                                </>
-                            )}
-                        </Button>
-                        <Button
-                            onClick={handleSaveEditedQuestion}
-                            disabled={updatePaperQuestionMutation.isPending}
-                        >
-                            {updatePaperQuestionMutation.isPending ? (
-                                <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Saving...
-                                </>
-                            ) : (
-                                "Save Question"
-                            )}
-                        </Button>
-                    </DialogFooter>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="space-y-2">
+                            <Label htmlFor="edit-marks">Marks</Label>
+                            <Select
+                                value={String(editedMarks)}
+                                onValueChange={(value) => setEditedMarks(Number(value))}
+                            >
+                                <SelectTrigger id="edit-marks">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="2">2</SelectItem>
+                                    <SelectItem value="8">8</SelectItem>
+                                    <SelectItem value="16">16</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="edit-bloom">Bloom Level</Label>
+                            <Select
+                                value={editedBloomLevel}
+                                onValueChange={(value: EditableBloomLevel) => setEditedBloomLevel(value)}
+                            >
+                                <SelectTrigger id="edit-bloom">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="REMEMBER">Remember</SelectItem>
+                                    <SelectItem value="UNDERSTAND">Understand</SelectItem>
+                                    <SelectItem value="APPLY">Apply</SelectItem>
+                                    <SelectItem value="ANALYZE">Analyze</SelectItem>
+                                    <SelectItem value="EVALUATE">Evaluate</SelectItem>
+                                    <SelectItem value="CREATE">Create</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="edit-co">CO Mapping</Label>
+                            <Input
+                                id="edit-co"
+                                value={editedMappingCO}
+                                onChange={(e) => setEditedMappingCO(e.target.value.toUpperCase())}
+                                placeholder="CO1"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="space-y-3">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+                            <Button
+                                variant="outline"
+                                className="w-full h-auto py-2 text-sm leading-tight whitespace-normal text-center"
+                                onClick={handleRegenerateQuestion}
+                                disabled={
+                                    editedQuestionText.trim().length < 10 ||
+                                    isRegeneratingQuestion ||
+                                    regeneratePaperAnswerMutation.isPending ||
+                                    updatePaperQuestionMutation.isPending
+                                }
+                            >
+                                {isRegeneratingQuestion ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Regenerating Question...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Sparkles className="mr-2 h-4 w-4" />
+                                        Regenerate Question and Answer Key
+                                    </>
+                                )}
+                            </Button>
+                            <Button
+                                variant="outline"
+                                className="w-full h-auto py-2 text-sm leading-tight whitespace-normal text-center"
+                                onClick={handleRegenerateAnswer}
+                                disabled={
+                                    editedQuestionText.trim().length < 10 ||
+                                    isRegeneratingQuestion ||
+                                    regeneratePaperAnswerMutation.isPending ||
+                                    updatePaperQuestionMutation.isPending
+                                }
+                            >
+                                {regeneratePaperAnswerMutation.isPending ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Regenerating...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Sparkles className="mr-2 h-4 w-4" />
+                                        Regenerate Answer Only
+                                    </>
+                                )}
+                            </Button>
+                        </div>
+
+                        <DialogFooter className="flex-col-reverse sm:flex-row sm:justify-end gap-2">
+                            <Button
+                                variant="ghost"
+                                className="sm:min-w-[120px]"
+                                onClick={() => setEditDialogOpen(false)}
+                                disabled={
+                                    isRegeneratingQuestion ||
+                                    regeneratePaperAnswerMutation.isPending ||
+                                    updatePaperQuestionMutation.isPending
+                                }
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                className="sm:min-w-[160px]"
+                                onClick={handleSaveEditedQuestion}
+                                disabled={
+                                    editedQuestionText.trim().length < 10 ||
+                                    updatePaperQuestionMutation.isPending
+                                }
+                            >
+                                {updatePaperQuestionMutation.isPending ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Saving...
+                                    </>
+                                ) : (
+                                    "Save Question"
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </div>
                 </DialogContent>
             </Dialog>
         </div>

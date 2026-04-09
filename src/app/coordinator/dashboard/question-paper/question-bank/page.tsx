@@ -90,6 +90,7 @@ export default function QuestionBankPage() {
     const [questionToEdit, setQuestionToEdit] = useState<Question | null>(null);
     const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
     const [isRegeneratingAnswer, setIsRegeneratingAnswer] = useState(false);
+    const [editedCoMapping, setEditedCoMapping] = useState("CO1");
 
     // Get user's courses
     const { data: coursesData } = trpc.coordinator.getCoursesForMaterialUpload.useQuery();
@@ -211,6 +212,7 @@ export default function QuestionBankPage() {
     // Handlers
     const handleEditQuestion = (question: Question) => {
         setQuestionToEdit(question);
+        setEditedCoMapping(`CO${question.unit}`);
         setEditDialogOpen(true);
     };
 
@@ -242,7 +244,15 @@ export default function QuestionBankPage() {
             difficultyLevel: questionToEdit.difficultyLevel,
             bloomLevel: questionToEdit.bloomLevel,
             questionType: questionToEdit.questionType as "DIRECT" | "INDIRECT" | "SCENARIO_BASED" | "PROBLEM_BASED",
-            unit: questionToEdit.unit,
+            unit: (() => {
+                const match = editedCoMapping.trim().toUpperCase().match(/^CO\s*(\d+)$/);
+                if (!match) {
+                    return questionToEdit.unit;
+                }
+
+                const parsed = Number(match[1]);
+                return Number.isFinite(parsed) && parsed > 0 ? parsed : questionToEdit.unit;
+            })(),
         });
     };
 
@@ -252,6 +262,7 @@ export default function QuestionBankPage() {
         regenerateAnswerMutation.mutate({
             questionId: questionToEdit.id,
             questionText: questionToEdit.question,
+            marks: questionToEdit.marks,
         });
     };
 
@@ -798,17 +809,17 @@ export default function QuestionBankPage() {
                     {questionToEdit && (
                         <div className="space-y-4">
                             <div className="space-y-2">
-                                <Label>Unit</Label>
+                                <Label>CO Mapping</Label>
                                 <Input
-                                    type="number"
-                                    value={questionToEdit.unit}
+                                    value={editedCoMapping}
                                     onChange={(e) =>
-                                        setQuestionToEdit({
-                                            ...questionToEdit,
-                                            unit: parseInt(e.target.value),
-                                        })
+                                        setEditedCoMapping(e.target.value.toUpperCase())
                                     }
+                                    placeholder="CO1"
                                 />
+                                <p className="text-xs text-muted-foreground">
+                                    CO mapping updates the underlying unit reference.
+                                </p>
                             </div>
                             <div className="space-y-2">
                                 <Label>Question</Label>

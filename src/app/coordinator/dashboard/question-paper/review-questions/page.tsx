@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Separator } from "@/components/ui/separator";
+import { RichContentRenderer } from "@/components/ui/rich-content-renderer";
 import { CheckCircle2, XCircle, MessageSquare, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,6 +20,7 @@ export default function ReviewQuestionsPage() {
     const [selectedCourseId, setSelectedCourseId] = useState<string>("");
     const [selectedStatus, setSelectedStatus] = useState<QuestionStatus | "all">("all");
     const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
+    const [processedQuestionIds, setProcessedQuestionIds] = useState<Set<string>>(new Set());
     const [showRejectDialog, setShowRejectDialog] = useState(false);
     const [showApproveDialog, setShowApproveDialog] = useState(false);
     const [rejectionReason, setRejectionReason] = useState("");
@@ -34,6 +36,10 @@ export default function ReviewQuestionsPage() {
             setSelectedCourseId(courses[0].id);
         }
     }, [courses, selectedCourseId]);
+
+    useEffect(() => {
+        setProcessedQuestionIds(new Set());
+    }, [selectedCourseId, selectedStatus]);
 
     // Fetch questions for review
     const { data: questionsData, refetch: refetchQuestions } = trpc.questionApproval.getQuestionsForReview.useQuery(
@@ -59,14 +65,17 @@ export default function ReviewQuestionsPage() {
     );
 
     const questions = questionsData?.data || [];
+    const visibleQuestions = questions.filter((question: any) => !processedQuestionIds.has(question.id));
     const stats = statsData?.data;
 
     // Mutations
     const approveCCMutation = trpc.questionApproval.approveAsCourseCoordinator.useMutation({
-        onSuccess: () => {
-            toast.success("Question approved successfully!");
+        onSuccess: (_data, variables) => {
+            setProcessedQuestionIds((prev) => new Set(prev).add(variables.questionId));
+            toast.success("Question marked approved. Showing next question.");
             refetchQuestions();
             setShowApproveDialog(false);
+            setSelectedQuestionId(null);
         },
         onError: (error) => {
             toast.error(error.message);
@@ -74,10 +83,12 @@ export default function ReviewQuestionsPage() {
     });
 
     const approveMCMutation = trpc.questionApproval.approveAsModuleCoordinator.useMutation({
-        onSuccess: () => {
-            toast.success("Question approved successfully!");
+        onSuccess: (_data, variables) => {
+            setProcessedQuestionIds((prev) => new Set(prev).add(variables.questionId));
+            toast.success("Question marked approved. Showing next question.");
             refetchQuestions();
             setShowApproveDialog(false);
+            setSelectedQuestionId(null);
         },
         onError: (error) => {
             toast.error(error.message);
@@ -85,10 +96,12 @@ export default function ReviewQuestionsPage() {
     });
 
     const approvePCMutation = trpc.questionApproval.approveAsProgramCoordinator.useMutation({
-        onSuccess: () => {
-            toast.success("Question approved and finalized!");
+        onSuccess: (_data, variables) => {
+            setProcessedQuestionIds((prev) => new Set(prev).add(variables.questionId));
+            toast.success("Question approved and finalized. Showing next question.");
             refetchQuestions();
             setShowApproveDialog(false);
+            setSelectedQuestionId(null);
         },
         onError: (error) => {
             toast.error(error.message);
@@ -96,11 +109,13 @@ export default function ReviewQuestionsPage() {
     });
 
     const rejectMutation = trpc.questionApproval.rejectQuestion.useMutation({
-        onSuccess: () => {
-            toast.success("Question rejected with feedback.");
+        onSuccess: (_data, variables) => {
+            setProcessedQuestionIds((prev) => new Set(prev).add(variables.questionId));
+            toast.success("Question rejected with feedback. Showing next question.");
             refetchQuestions();
             setShowRejectDialog(false);
             setRejectionReason("");
+            setSelectedQuestionId(null);
         },
         onError: (error) => {
             toast.error(error.message);
@@ -282,14 +297,14 @@ export default function ReviewQuestionsPage() {
 
                         {/* Questions List */}
                         <div className="space-y-4">
-                            {questions.length === 0 ? (
+                            {visibleQuestions.length === 0 ? (
                                 <Card>
                                     <CardContent className="py-12 text-center">
                                         <p className="text-muted-foreground">No questions found for the selected filters.</p>
                                     </CardContent>
                                 </Card>
                             ) : (
-                                questions.map((question: any) => (
+                                visibleQuestions.map((question: any) => (
                                     <Card key={question.id}>
                                         <CardHeader>
                                             <div className="flex justify-between items-start">
@@ -301,14 +316,23 @@ export default function ReviewQuestionsPage() {
                                                         <Badge variant="outline">{question.marks} marks</Badge>
                                                         <Badge variant="outline">Unit {question.unit}</Badge>
                                                     </div>
-                                                    <CardTitle className="text-lg">{question.question}</CardTitle>
+                                                    <CardTitle className="text-lg leading-relaxed">
+                                                        <RichContentRenderer
+                                                            content={question.question}
+                                                            renderingType={question.renderingType}
+                                                            latexContent={question.latexContent}
+                                                            mermaidContent={question.mermaidContent}
+                                                        />
+                                                    </CardTitle>
                                                 </div>
                                             </div>
                                         </CardHeader>
                                         <CardContent className="space-y-4">
                                             <div>
                                                 <h4 className="text-sm font-semibold mb-2 text-muted-foreground">Answer:</h4>
-                                                <p className="text-sm">{question.answer}</p>
+                                                <div className="text-sm leading-relaxed">
+                                                    <RichContentRenderer content={question.answer} />
+                                                </div>
                                             </div>
 
                                             <Separator />

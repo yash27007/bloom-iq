@@ -12,6 +12,7 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, coordinatorProcedure } from "@/trpc/init";
 import { QuestionService } from "@/services/question.service";
 import { prisma } from "@/lib/prisma";
+import type { QuestionStatus } from "@/generated/prisma/client";
 
 /**
  * Input schemas
@@ -73,6 +74,12 @@ const getQuestionFeedbackSchema = z.object({
   questionId: z.string().uuid("Invalid question ID"),
 });
 
+const REVIEW_PENDING_STATUSES: QuestionStatus[] = [
+  "CREATED_BY_COURSE_COORDINATOR",
+  "UNDER_REVIEW_FROM_MODULE_COORDINATOR",
+  "UNDER_REVIEW_FROM_PROGRAM_COORDINATOR",
+];
+
 export const questionApprovalRouter = createTRPCRouter({
   /**
    * Course Coordinator approves their own questions
@@ -117,7 +124,7 @@ export const questionApprovalRouter = createTRPCRouter({
         }
 
         const result = await QuestionService.approveQuestionByCourseCoordinator(
-          input.questionId
+          input.questionId,
         );
 
         return {
@@ -179,7 +186,7 @@ export const questionApprovalRouter = createTRPCRouter({
         }
 
         const result = await QuestionService.approveQuestionByModuleCoordinator(
-          input.questionId
+          input.questionId,
         );
 
         return {
@@ -242,7 +249,7 @@ export const questionApprovalRouter = createTRPCRouter({
 
         const result =
           await QuestionService.approveQuestionByProgramCoordinator(
-            input.questionId
+            input.questionId,
           );
 
         return {
@@ -308,7 +315,7 @@ export const questionApprovalRouter = createTRPCRouter({
         const result = await QuestionService.rejectQuestion(
           input.questionId,
           input.remarks,
-          rejectedByRole
+          rejectedByRole,
         );
 
         return {
@@ -333,16 +340,67 @@ export const questionApprovalRouter = createTRPCRouter({
    */
   getQuestionsForReview: coordinatorProcedure
     .input(getQuestionsForReviewSchema)
-    .query(async ({ input, ctx: _ctx }) => {
+    .query(async ({ input, ctx }) => {
       try {
+        const course = await prisma.course.findUnique({
+          where: { id: input.courseId },
+          select: {
+            courseCoordinatorId: true,
+            moduleCoordinatorId: true,
+            programCoordinatorId: true,
+          },
+        });
+
+        if (!course) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Course not found.",
+          });
+        }
+
+        const roleBasedStatuses: QuestionStatus[] = [];
+
+        if (course.courseCoordinatorId === ctx.user.id) {
+          roleBasedStatuses.push("CREATED_BY_COURSE_COORDINATOR");
+        }
+
+        if (course.moduleCoordinatorId === ctx.user.id) {
+          roleBasedStatuses.push("UNDER_REVIEW_FROM_MODULE_COORDINATOR");
+        }
+
+        if (course.programCoordinatorId === ctx.user.id) {
+          roleBasedStatuses.push("UNDER_REVIEW_FROM_PROGRAM_COORDINATOR");
+        }
+
+        if (roleBasedStatuses.length === 0) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message:
+              "You are not authorized to review questions for this course.",
+          });
+        }
+
+        if (
+          input.status &&
+          REVIEW_PENDING_STATUSES.includes(input.status) &&
+          !roleBasedStatuses.includes(input.status)
+        ) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message:
+              "You are not authorized to review questions in this stage.",
+          });
+        }
+
         const result = await QuestionService.getQuestionsByCourse(
           input.courseId,
           {
             status: input.status,
+            statuses: input.status ? undefined : roleBasedStatuses,
             unit: input.unit,
             bloomLevel: input.bloomLevel,
             difficultyLevel: input.difficultyLevel,
-          }
+          },
         );
 
         return {

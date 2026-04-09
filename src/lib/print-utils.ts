@@ -5,6 +5,7 @@ interface ProfessionalPrintOptions {
   html: string;
   orientation?: PageOrientation;
   autoClose?: boolean;
+  renderRichContent?: boolean;
 }
 
 const PROFESSIONAL_PRINT_STYLES = `
@@ -19,6 +20,8 @@ const PROFESSIONAL_PRINT_STYLES = `
 
   * {
     box-sizing: border-box;
+    -webkit-user-select: text;
+    user-select: text;
   }
 
   html,
@@ -51,21 +54,38 @@ const PROFESSIONAL_PRINT_STYLES = `
   table {
     width: 100%;
     border-collapse: collapse;
-    table-layout: fixed;
+    table-layout: auto;
   }
 
   th,
   td {
     border: 1px solid #111827;
-    padding: 6px;
+    padding: 4px 6px;
     vertical-align: top;
-    word-break: break-word;
+    word-break: normal;
+    overflow-wrap: normal;
   }
 
   th {
     font-weight: 700;
     text-align: left;
     background: #f3f4f6;
+    white-space: nowrap;
+  }
+
+  .print-paper-table,
+  .print-answer-table,
+  .print-qna-table {
+    table-layout: fixed;
+  }
+
+  .print-paper-table td.col-question,
+  .print-answer-table td.col-question,
+  .print-answer-table td.col-answer,
+  .print-qna-table td.col-question,
+  .print-qna-table td.col-answer {
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .text-center {
@@ -178,6 +198,36 @@ const PROFESSIONAL_PRINT_STYLES = `
   .print\\:hidden {
     display: none !important;
   }
+
+  .print-math-display {
+    display: block;
+    margin: 3px 0;
+    overflow-x: auto;
+    text-align: center;
+  }
+
+  .print-math-inline {
+    display: inline;
+  }
+
+  .print-mermaid-container {
+    margin: 4px 0;
+    border: 1px solid #d1d5db;
+    padding: 4px;
+    background: #f9fafb;
+    overflow-x: auto;
+  }
+
+  .print-mermaid {
+    white-space: pre-wrap;
+    font-family: "Courier New", monospace;
+    font-size: 11px;
+  }
+
+  .print-mermaid-svg svg {
+    max-width: 100%;
+    height: auto;
+  }
 `;
 
 function escapeHtml(value: string) {
@@ -195,7 +245,13 @@ function createPrintStyles(orientation: PageOrientation) {
 }
 
 export function openProfessionalPrintWindow(options: ProfessionalPrintOptions) {
-  const { title, html, orientation = "portrait", autoClose = true } = options;
+  const {
+    title,
+    html,
+    orientation = "portrait",
+    autoClose = true,
+    renderRichContent = false,
+  } = options;
 
   if (!html.trim()) {
     return { ok: false as const, error: "No printable content available." };
@@ -214,6 +270,9 @@ export function openProfessionalPrintWindow(options: ProfessionalPrintOptions) {
   const closeScript = autoClose
     ? "setTimeout(function () { window.close(); }, 300);"
     : "";
+  const richHead = renderRichContent
+    ? '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous" />'
+    : "";
 
   printWindow.document.open();
   printWindow.document.write(`
@@ -222,23 +281,113 @@ export function openProfessionalPrintWindow(options: ProfessionalPrintOptions) {
       <head>
         <meta charset="utf-8" />
         <title>${safeTitle}</title>
+        ${richHead}
         <style>${createPrintStyles(orientation)}</style>
       </head>
       <body>
         <main class="print-shell">${html}</main>
         <script>
           (function () {
-            function startPrint() {
+            async function loadScript(src) {
+              return new Promise(function (resolve, reject) {
+                var script = document.createElement("script");
+                script.src = src;
+                script.onload = resolve;
+                script.onerror = reject;
+                document.head.appendChild(script);
+              });
+            }
+
+            async function renderMath() {
+              var mathNodes = document.querySelectorAll(".print-math-inline[data-latex], .print-math-display[data-latex]");
+              if (!mathNodes.length) return;
+
+              try {
+                await loadScript("https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js");
+              } catch (_err) {
+                return;
+              }
+
+              if (typeof window.katex === "undefined") return;
+
+              mathNodes.forEach(function (node) {
+                var latex = node.getAttribute("data-latex") || "";
+                if (!latex.trim()) return;
+
+                try {
+                  var isDisplay = node.classList.contains("print-math-display");
+                  window.katex.render(latex, node, {
+                    displayMode: isDisplay,
+                    throwOnError: false,
+                    strict: false,
+                  });
+                } catch (_e) {
+                  // Keep fallback source text when rendering fails.
+                }
+              });
+            }
+
+            async function renderMermaidDiagrams() {
+              var mermaidBlocks = Array.prototype.slice.call(
+                document.querySelectorAll("pre.print-mermaid"),
+              );
+              if (!mermaidBlocks.length) return;
+
+              try {
+                await loadScript("https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js");
+              } catch (_err) {
+                return;
+              }
+
+              if (typeof window.mermaid === "undefined") return;
+
+              window.mermaid.initialize({
+                startOnLoad: false,
+                securityLevel: "loose",
+                theme: "default",
+              });
+
+              for (var i = 0; i < mermaidBlocks.length; i += 1) {
+                var source = (mermaidBlocks[i].textContent || "").trim();
+                if (!source) continue;
+
+                try {
+                  var renderId = "print-mermaid-" + Date.now() + "-" + i;
+                  var rendered = await window.mermaid.render(renderId, source);
+                  var container = mermaidBlocks[i].closest(".print-mermaid-container");
+                  if (!container) continue;
+                  container.innerHTML = '<div class="print-mermaid-svg">' + rendered.svg + "</div>";
+                } catch (_e) {
+                  // Keep original mermaid source on rendering failure.
+                }
+              }
+            }
+
+            async function renderRichContent() {
+              ${renderRichContent ? "await renderMath(); await renderMermaidDiagrams();" : "return;"}
+            }
+
+            async function startPrint() {
+              try {
+                await renderRichContent();
+              } catch (_e) {
+                // Print even if rich rendering fails.
+              }
+
               window.focus();
               window.print();
               ${closeScript}
             }
 
             if (document.readyState === "complete") {
-              setTimeout(startPrint, 120);
+              setTimeout(function () {
+                startPrint();
+              }, 120);
             } else {
               window.addEventListener("load", function () {
-                setTimeout(startPrint, 120);
+                setTimeout(function () {
+                  startPrint();
+                }, 120);
               });
             }
           })();

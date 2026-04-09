@@ -85,6 +85,10 @@ export default function ViewPapersPage() {
     const courses = coursesData || [];
     const { data: committeeContext } = trpc.paper.getCommitteeContext.useQuery();
     const currentRole = committeeContext?.role;
+    const canDeletePapers =
+        currentRole === "HOD" ||
+        currentRole === "DEAN" ||
+        currentRole === "CONTROLLER_OF_EXAMINATION";
 
     const getApprovals = (paper: Paper) => {
         try {
@@ -375,7 +379,7 @@ export default function ViewPapersPage() {
                                                 </Button>
                                             )}
 
-                                            {currentRole === "CONTROLLER_OF_EXAMINATION" && (
+                                            {canDeletePapers && (
                                                 <Button
                                                     size="sm"
                                                     variant="destructive"

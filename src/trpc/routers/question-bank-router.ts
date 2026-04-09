@@ -444,6 +444,7 @@ export const questionBankRouter = createTRPCRouter({
         questionText: z
           .string()
           .min(10, "Question must be at least 10 characters"),
+        marks: z.enum(["TWO", "EIGHT", "SIXTEEN"]).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -493,12 +494,9 @@ export const questionBankRouter = createTRPCRouter({
         });
       }
 
+      const marksEnum = input.marks || existingQuestion.marks;
       const marksValue =
-        existingQuestion.marks === "TWO"
-          ? 2
-          : existingQuestion.marks === "EIGHT"
-            ? 8
-            : 16;
+        marksEnum === "TWO" ? 2 : marksEnum === "EIGHT" ? 8 : 16;
 
       const prompt = `You are an expert university examiner. Generate a concise model answer.
 
@@ -520,6 +518,7 @@ Requirements:
         data: {
           question: input.questionText,
           answer: regeneratedAnswer,
+          marks: marksEnum,
         },
       });
 
@@ -578,6 +577,7 @@ Requirements:
         updateData = {
           reviewedByCc: true,
           ccApprovedAt: new Date(),
+          status: "UNDER_REVIEW_FROM_MODULE_COORDINATOR",
         };
       } else if (
         userRole === "MODULE_COORDINATOR" &&
@@ -592,6 +592,7 @@ Requirements:
         updateData = {
           reviewedByMc: true,
           mcApprovedAt: new Date(),
+          status: "UNDER_REVIEW_FROM_PROGRAM_COORDINATOR",
         };
       } else if (
         userRole === "PROGRAM_COORDINATOR" &&
@@ -606,6 +607,8 @@ Requirements:
         updateData = {
           reviewedByPc: true,
           pcApprovedAt: new Date(),
+          status: "ACCEPTED",
+          isFinalized: true,
         };
       } else if (userRole === "DEAN") {
         if (
@@ -619,6 +622,7 @@ Requirements:
           });
         }
         updateData = {
+          status: "ACCEPTED",
           isFinalized: true,
         };
       } else {
@@ -731,19 +735,24 @@ Requirements:
         updateData = {
           reviewedByCc: true,
           ccApprovedAt: new Date(),
+          status: "UNDER_REVIEW_FROM_MODULE_COORDINATOR",
         };
       } else if (userRole === "MODULE_COORDINATOR") {
         updateData = {
           reviewedByMc: true,
           mcApprovedAt: new Date(),
+          status: "UNDER_REVIEW_FROM_PROGRAM_COORDINATOR",
         };
       } else if (userRole === "PROGRAM_COORDINATOR") {
         updateData = {
           reviewedByPc: true,
           pcApprovedAt: new Date(),
+          status: "ACCEPTED",
+          isFinalized: true,
         };
       } else if (userRole === "DEAN") {
         updateData = {
+          status: "ACCEPTED",
           isFinalized: true,
         };
       }
