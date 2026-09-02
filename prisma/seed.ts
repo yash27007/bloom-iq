@@ -211,7 +211,7 @@ function generateFacultyId(index: number, department: string) {
 function generateEmail(firstName: string, lastName: string, index: number) {
   const cleanFirst = firstName.toLowerCase().replace(/[^a-z]/g, "");
   const cleanLast = lastName.toLowerCase().replace(/[^a-z]/g, "");
-  return `${cleanFirst}.${cleanLast}${index}bloomiq.com`;
+  return `${cleanFirst}.${cleanLast}${index}@bloomiq.com`;
 }
 
 async function hashPassword(plain: string) {
@@ -234,11 +234,14 @@ async function main() {
 
   const TOTAL_USERS = 100;
 
-  // Role distribution (must sum to TOTAL_USERS)
-  // includes 1 admin, so there will be exactly 1 ADMIN in the seeded users
+  // Deterministic admin for first login (documented in README).
+  const ADMIN_EMAIL = "admin@bloomiq.com";
+  const ADMIN_PASSWORD = "Password@123";
+
+  // Role distribution for the randomised users (must sum to TOTAL_USERS).
+  // The single ADMIN is created separately as ADMIN_EMAIL below.
   const roleDistribution: { role: Role; count: number }[] = [
-    { role: Role.ADMIN, count: 1 },
-    { role: Role.COURSE_COORDINATOR, count: 35 },
+    { role: Role.COURSE_COORDINATOR, count: 36 },
     { role: Role.MODULE_COORDINATOR, count: 25 },
     { role: Role.PROGRAM_COORDINATOR, count: 20 },
     { role: Role.CONTROLLER_OF_EXAMINATION, count: 19 },
@@ -249,6 +252,31 @@ async function main() {
   // create users
   const users: Array<any> = [];
   let userIndex = 1;
+
+  // Seed the deterministic admin account first.
+  try {
+    const admin = await prisma.user.create({
+      data: {
+        name: "System Admin",
+        firstName: "System",
+        lastName: "Admin",
+        email: ADMIN_EMAIL,
+        facultyId: `ADM${new Date().getFullYear()}0000`,
+        password: await hashPassword(ADMIN_PASSWORD),
+        role: Role.ADMIN,
+        designation: getRandomElement(designations) as Designation,
+        isActive: true,
+      },
+    });
+    users.push(admin);
+    console.log(`   ✅ Admin account: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
+  } catch (err: any) {
+    console.warn(
+      `   ⚠️ Admin account not created (may already exist): ${
+        err?.message?.split("\n")[0] ?? err
+      }`,
+    );
+  }
 
   console.log(`👥 Creating ${TOTAL_USERS} users...`);
   for (const bucket of roleDistribution) {
@@ -515,7 +543,8 @@ async function main() {
   );
   console.log(`  Total courses created: ${courses.length}`);
   console.log(`  Total course materials created: ${materialsCreated}`);
-  console.log("\n  Default password for seeded accounts: Password@123");
+  console.log(`\n  Admin login: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
+  console.log("  Default password for all seeded accounts: Password@123");
   console.log("=".repeat(40) + "\n");
 
   await prisma.$disconnect();

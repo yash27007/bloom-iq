@@ -80,54 +80,52 @@ bun install
 
 ### 2. Configure Environment
 
-Create `.env` (see `.env.example` for a template):
-
-```env
-# Database (Neon for production, local Postgres for dev)
-DATABASE_URL=postgresql://user:pass@host:5432/bloom_iq
-DIRECT_URL=postgresql://user:pass@host:5432/bloom_iq   # direct connection, used for migrations
-
-# Authentication
-BETTER_AUTH_SECRET=your-secret-key-min-32-chars   # openssl rand -base64 32
-BETTER_AUTH_URL=http://localhost:3000
-
-# AI Provider: GEMINI or OLLAMA
-AI_PROVIDER=GEMINI
-
-# Gemini (recommended for deployment) — supports round-robin rotation
-GEMINI_API_KEY=your_api_key_here
-GEMINI_API_KEY_1=second_api_key        # optional, for rate-limit avoidance
-GEMINI_API_KEY_2=third_api_key         # optional
-GEMINI_MODEL=gemini-2.5-flash          # optional, this is the default
-
-# Ollama (local development)
-# OLLAMA_URL=http://localhost:11434
-# OLLAMA_MODEL=mistral:7b
-# OLLAMA_EMBEDDING_MODEL=nomic-embed-text:v1.5
-
-# Optional web-search grounding
-# TAVILY_API_KEY=
-# SERPER_API_KEY=
-
-NODE_ENV=development
+```bash
+cp .env.example .env
 ```
 
-### 3. Start Database
+Then edit `.env`. For a **local Docker database the `DATABASE_URL` / `DIRECT_URL` defaults work as-is** — you only need to set:
+
+- `BETTER_AUTH_SECRET` — any random 32+ char string (`openssl rand -base64 32`)
+- `GEMINI_API_KEY` — a free key from [Google AI Studio](https://aistudio.google.com/app/apikey)
+
+`.env.example` documents every other variable, including the Ollama block if you prefer running the model locally (`AI_PROVIDER=OLLAMA`).
+
+### 3. Start the Database
 
 **Local development:**
 ```bash
 docker compose -f docker-compose.dev.yml up -d
 ```
+(The container has no restart policy — run this again after a reboot.)
 
 **Production:** use [Neon DB](https://neon.tech).
 
 ### 4. Set Up the Database
 
+One command generates the Prisma client, applies migrations, and seeds test data:
+
+```bash
+bun run setup
+```
+
+<details>
+<summary>...or run the steps individually</summary>
+
 ```bash
 bunx prisma generate       # generate the Prisma client into src/generated/prisma
-bunx prisma migrate dev    # apply migrations
-bun run prisma/seed.ts     # optional: seed test data
+bunx prisma migrate deploy # apply migrations
+bun run prisma/seed.ts     # seed test data (100 users, 25 courses, materials)
 ```
+</details>
+
+The seed creates a ready-to-use admin account:
+
+| Email | Password |
+|-------|----------|
+| `admin@bloomiq.com` | `Password@123` |
+
+All other seeded accounts (course/module/program coordinators, COE) use the same password. Their emails are printed at the end of the seed output in the form `first.lastN@bloomiq.com`.
 
 ### 5. Run the Development Server
 
@@ -135,7 +133,7 @@ bun run prisma/seed.ts     # optional: seed test data
 bun run dev
 ```
 
-The app runs at http://localhost:3000.
+The app runs at http://localhost:3000. Sign in with `admin@bloomiq.com` / `Password@123`.
 
 ## AI Provider Setup
 
@@ -253,8 +251,11 @@ bun run build            # prisma generate && next build
 bun run start            # Start production server
 
 # Database
+bun run setup            # generate + migrate deploy + seed (first-time setup)
 bun run generate         # prisma generate
-bun run migrate          # prisma migrate dev
+bun run migrate          # prisma migrate dev (create a new migration)
+bun run db:migrate       # prisma migrate deploy (apply existing migrations)
+bun run db:reset         # prisma migrate reset --force (drop, re-migrate, re-seed)
 bun run seed             # bun run prisma/seed.ts
 bunx prisma studio       # Open the database GUI
 
