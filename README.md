@@ -284,9 +284,6 @@ For Neon, make sure the connection string includes `?sslmode=require` and that `
 - Check the application logs for detailed error messages
 
 ## License
+This project is licensed under [GNU Affero General Public License (GNU AGPL)](LICENSE)
 
-MIT
-
----
-
-**Built with academic rigor and production quality.**
+> Leave a start if you felt the repo was useful ⭐
